@@ -17,7 +17,7 @@ export function SiteHeader() {
           className="min-h-11 min-w-0 shrink-0 py-2 pr-2 text-base font-semibold leading-none tracking-tight sm:min-h-0 sm:py-0 sm:text-[0.9375rem]"
           href="/"
         >
-          CTWA Orders
+          Chakra App
         </Link>
         <Separator className="hidden h-6 sm:block" orientation="vertical" />
         <nav className="flex flex-1 flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-4">

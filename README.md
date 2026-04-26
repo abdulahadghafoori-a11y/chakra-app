@@ -1,6 +1,8 @@
-# CTWA + Meta CAPI (Next.js 15)
+# Chakra App (Next.js 15)
 
-Production-oriented app for storing Click-to-WhatsApp (YCloud) sessions, recording orders in **Neon Postgres** via **Drizzle**, and sending **Purchase** events to **Meta Conversions API** (Graph) from a Server Action.
+**Chakra App** is a production-oriented dashboard for storing Click-to-WhatsApp (YCloud) sessions, recording orders in **Neon Postgres** via **Drizzle**, and sending **Purchase** events to **Meta Conversions API** (Graph) from a Server Action.
+
+Repository: [github.com/abdulahadghafoori-a11y/chakra-app](https://github.com/abdulahadghafoori-a11y/chakra-app)
 
 ## Prerequisites
 
@@ -13,7 +15,7 @@ Production-oriented app for storing Click-to-WhatsApp (YCloud) sessions, recordi
 1. **Install dependencies**
 
    ```bash
-   cd ctwa-meta-app
+   cd chakra-app
    npm install
    ```
 
@@ -46,18 +48,26 @@ Production-oriented app for storing Click-to-WhatsApp (YCloud) sessions, recordi
 
 ## GitHub
 
-1. Create a new **empty** repository on [github.com/new](https://github.com/new) (no README/license; name e.g. `ctwa-meta-app`).
-2. From this project folder:
+Remote for this project: `https://github.com/abdulahadghafoori-a11y/chakra-app.git`
 
-   ```bash
-   git add -A
-   git commit -m "Initial commit: CTWA orders, YCloud webhooks, Meta CAPI"
-   git branch -M main
-   git remote add origin https://github.com/<YOUR_USER>/<YOUR_REPO>.git
-   git push -u origin main
-   ```
+If you are pushing for the first time:
 
-   Use **SSH** instead if you prefer: `git remote add origin git@github.com:<YOUR_USER>/<YOUR_REPO>.git`
+```bash
+git add -A
+git commit -m "Initial commit: Chakra App"
+git branch -M main
+git remote add origin https://github.com/abdulahadghafoori-a11y/chakra-app.git
+git push -u origin main
+```
+
+If `origin` already exists, point it at this repo:
+
+```bash
+git remote set-url origin https://github.com/abdulahadghafoori-a11y/chakra-app.git
+git push -u origin main
+```
+
+SSH: `git@github.com:abdulahadghafoori-a11y/chakra-app.git`
 
 ## Vercel
 

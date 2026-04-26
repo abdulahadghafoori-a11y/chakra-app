@@ -17,8 +17,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CTWA Orders",
-  description: "Click-to-WhatsApp sessions, orders, and Meta CAPI",
+  title: "Chakra App",
+  description:
+    "WhatsApp orders, Click-to-WhatsApp sessions, and Meta Conversions API",
 };
 
 export const viewport: Viewport = {
