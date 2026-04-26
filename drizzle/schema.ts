@@ -1,4 +1,4 @@
-import { desc, sql } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -107,9 +107,11 @@ export const conversationMessages = pgTable(
   },
   (t) => [
     index("conversation_messages_conversation_id_idx").on(t.conversationId),
-    uniqueIndex("conversation_messages_provider_wamid_unique")
-      .on(t.providerMessageId)
-      .where(sql`${t.providerMessageId} is not null`),
+    // Full unique index (not partial) so ON CONFLICT (provider_message_id) works.
+    // Postgres allows multiple NULLs; only inbound user rows set wamid.
+    uniqueIndex("conversation_messages_provider_wamid_unique").on(
+      t.providerMessageId,
+    ),
   ],
 );
 
