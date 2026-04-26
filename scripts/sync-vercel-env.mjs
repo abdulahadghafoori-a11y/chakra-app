@@ -39,6 +39,7 @@ function runVercelEnvAdd(name, target, value) {
     process.execPath,
     [
       vercelCli,
+      "--non-interactive",
       "env",
       "add",
       name,
@@ -49,7 +50,11 @@ function runVercelEnvAdd(name, target, value) {
       "--sensitive",
       "--force",
     ],
-    { cwd: root, stdio: "inherit", env: process.env },
+    {
+      cwd: root,
+      stdio: "inherit",
+      env: { ...process.env, CI: "1" },
+    },
   );
 }
 
