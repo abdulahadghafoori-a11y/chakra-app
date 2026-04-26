@@ -4,7 +4,7 @@ import { contacts } from "@/drizzle/schema";
 import { db } from "@/lib/db";
 
 export type UpsertContactInput = {
-  /** E.164 with +; unique key (`contacts.phone_number`). */
+  /** International digits only (WhatsApp `wa_id`); unique key (`contacts.phone_number`). */
   phoneNumber: string;
   name: string | null;
   countryCode?: string | null;
@@ -14,7 +14,7 @@ export type UpsertContactInput = {
 };
 
 /**
- * One contact per phone (E.164). Idempotent for concurrent webhooks (unique on phone_number).
+ * One contact per phone (international digits). Idempotent for concurrent webhooks (unique on phone_number).
  * Keeps existing name when a webhook sends an empty name; country only fills/wins non-null
  * updates; create_time is always the earliest seen candidate.
  */

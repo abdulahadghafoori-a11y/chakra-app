@@ -45,3 +45,4 @@ next-env.d.ts
 .agents/
 .neon
 skills-lock.json
+.vercel

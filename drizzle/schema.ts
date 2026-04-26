@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * One WhatsApp identity per row (E.164 phone, merged profile from webhooks).
+ * One WhatsApp identity per row (international digits only, same as `wa_id`, no `+`).
  * `create_time` is the earliest known event time (LEAST on upsert).
  */
 export const contacts = pgTable(
@@ -33,7 +33,8 @@ export const contacts = pgTable(
  * One row per CTWA referral session (unique on contact + clid + send_time).
  * `send_time` is the earliest of message send vs envelope time (and legacy ingest time on migrate).
  * Phone and display name live on `contacts` via `contact_id`.
- * `waba_id` comes from YCloud `whatsappInboundMessage.wabaId` (Meta WABA for CAPI).
+ * `waba_id` is Meta WhatsApp Business Account id (`entry.id` on Cloud API webhooks).
+ * `phone_number_id` is Cloud API `metadata.phone_number_id` for the receiving number.
  */
 export const ctwaSessions = pgTable(
   "ctwa_sessions",
@@ -44,6 +45,7 @@ export const ctwaSessions = pgTable(
       .references(() => contacts.id, { onDelete: "cascade" }),
     ctwaClid: text("ctwa_clid").notNull(),
     wabaId: text("waba_id"),
+    phoneNumberId: text("phone_number_id"),
     sourceId: text("source_id"),
     sourceUrl: text("source_url"),
     sourceType: text("source_type"),
@@ -58,6 +60,68 @@ export const ctwaSessions = pgTable(
       t.sendTime,
     ),
   ],
+);
+
+/**
+ * WhatsApp sales agent thread (one per customer line identity + optional phone_number_id).
+ */
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    waId: text("wa_id").notNull(),
+    phoneNumberId: text("phone_number_id"),
+    /** `bot` | `handoff` — handoff stops automated replies. */
+    status: text("status").notNull().default("bot"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("conversations_wa_id_idx").on(t.waId),
+    index("conversations_contact_id_idx").on(t.contactId),
+  ],
+);
+
+export const conversationMessages = pgTable(
+  "conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    /** Inbound WhatsApp message id (`wamid`) when role is `user`. */
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("conversation_messages_conversation_id_idx").on(t.conversationId),
+    uniqueIndex("conversation_messages_provider_wamid_unique")
+      .on(t.providerMessageId)
+      .where(sql`${t.providerMessageId} is not null`),
+  ],
+);
+
+/** Idempotency: inbound `wamid` fully processed by sales agent (reply sent or skipped). */
+export const salesAgentInboundComplete = pgTable(
+  "sales_agent_inbound_complete",
+  {
+    wamid: text("wamid").primaryKey(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
 );
 
 export const products = pgTable(
@@ -81,7 +145,7 @@ export const products = pgTable(
 
 /**
  * Business id is `id` (e.g. ORD-…). Phone and `ctwa_clid` are not stored; resolve via
- * `contact_id` → contacts.phone_number and optional `ctwa_session_id` → ctwa_sessions.ctwa_clid.
+ * `contact_id` → contacts.phone_number (digits only) and optional `ctwa_session_id` → ctwa_sessions.ctwa_clid.
  */
 export const orders = pgTable(
   "orders",
@@ -136,6 +200,9 @@ export const orderItems = pgTable(
     index("order_items_order_id_idx").on(t.orderId),
   ],
 );
+
+export type Conversation = typeof conversations.$inferSelect;
+export type ConversationMessage = typeof conversationMessages.$inferSelect;
 
 export type Contact = typeof contacts.$inferSelect;
 export type CtwaSession = typeof ctwaSessions.$inferSelect;

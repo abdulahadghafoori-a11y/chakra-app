@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { contacts } from "@/drizzle/schema";
 import { db } from "@/lib/db";
-import { parseToE164 } from "@/lib/phone";
+import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 
 export type ContactLookup = {
   id: string;
@@ -18,13 +18,13 @@ export type ContactLookup = {
 export async function getContactByPhone(
   rawPhone: string,
 ): Promise<ContactLookup | null> {
-  const e164 = parseToE164(rawPhone);
-  if (!e164) return null;
+  const phoneKey = contactPhoneKeyFromRaw(rawPhone);
+  if (!phoneKey) return null;
 
   const [row] = await db
     .select()
     .from(contacts)
-    .where(eq(contacts.phoneNumber, e164))
+    .where(eq(contacts.phoneNumber, phoneKey))
     .limit(1);
 
   if (!row) return null;

@@ -380,6 +380,9 @@ export function NewOrderForm({
                       {latestSession?.wabaId ? (
                         <p className="text-muted-foreground font-mono text-xs">
                           WABA {latestSession.wabaId}
+                          {latestSession.phoneNumberId
+                            ? ` · phone_number_id ${latestSession.phoneNumberId}`
+                            : null}
                         </p>
                       ) : null}
                       <FormMessage />
@@ -776,6 +779,9 @@ export function NewOrderForm({
                               <dt className="text-muted-foreground">WABA</dt>
                               <dd className="font-mono text-xs break-all">
                                 {reviewSummary.ctwaSession.wabaId}
+                                {reviewSummary.ctwaSession.phoneNumberId
+                                  ? ` · phone_number_id ${reviewSummary.ctwaSession.phoneNumberId}`
+                                  : null}
                               </dd>
                             </div>
                           ) : null}

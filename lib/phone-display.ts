@@ -10,10 +10,11 @@ export type PhonePresentation = {
 };
 
 /**
- * Derives display formatting and country from an E.164 value (e.g. +937…).
+ * Derives display formatting and country from stored `contacts.phone_number`
+ * (international digits) or legacy E.164 with `+`.
  */
-export function getPhonePresentation(e164: string): PhonePresentation {
-  if (!e164?.trim()) {
+export function getPhonePresentation(storedPhone: string): PhonePresentation {
+  if (!storedPhone?.trim()) {
     return {
       formattedInternational: "",
       countryCode: null,
@@ -21,10 +22,15 @@ export function getPhonePresentation(e164: string): PhonePresentation {
     };
   }
 
-  const parsed = parsePhoneNumberFromString(e164.trim());
+  const raw = storedPhone.trim();
+  const forParse = raw.startsWith("+")
+    ? raw
+    : `+${raw.replace(/\D/g, "")}`;
+
+  const parsed = parsePhoneNumberFromString(forParse);
   if (!parsed) {
     return {
-      formattedInternational: e164,
+      formattedInternational: raw,
       countryCode: null,
       countryName: null,
     };

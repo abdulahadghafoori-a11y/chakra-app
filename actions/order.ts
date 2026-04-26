@@ -21,7 +21,8 @@ import {
   isWithinMetaEventTimeWindow,
   kabulDateTimeLocalToDate,
 } from "@/lib/kabul-time";
-import { e164ToDigits, parseToE164 } from "@/lib/phone";
+import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
+import { e164ToDigits } from "@/lib/phone";
 import {
   APP_CURRENCY,
   createOrderSchema,
@@ -63,15 +64,15 @@ export async function previewOrderCapiPayload(
   }
 
   const data = parsed.data;
-  const phoneE164 = parseToE164(data.phone);
-  if (!phoneE164) {
+  const phoneKey = contactPhoneKeyFromRaw(data.phone);
+  if (!phoneKey) {
     return { ok: false, error: "Enter a valid phone number (with country code)." };
   }
 
   const [contact] = await db
     .select()
     .from(contacts)
-    .where(eq(contacts.phoneNumber, phoneE164))
+    .where(eq(contacts.phoneNumber, phoneKey))
     .limit(1);
 
   if (!contact) {
@@ -228,15 +229,15 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   }
 
   const data = parsed.data;
-  const phoneE164 = parseToE164(data.phone);
-  if (!phoneE164) {
+  const phoneKey = contactPhoneKeyFromRaw(data.phone);
+  if (!phoneKey) {
     return { ok: false, error: "Enter a valid phone number (with country code)." };
   }
 
   const [contact] = await db
     .select()
     .from(contacts)
-    .where(eq(contacts.phoneNumber, phoneE164))
+    .where(eq(contacts.phoneNumber, phoneKey))
     .limit(1);
 
   if (!contact) {

@@ -4,7 +4,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { contacts, ctwaSessions } from "@/drizzle/schema";
 import { db } from "@/lib/db";
-import { parseToE164 } from "@/lib/phone";
+import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 
 export type CtwaSessionRow = {
   id: string;
@@ -12,6 +12,7 @@ export type CtwaSessionRow = {
   contactName: string | null;
   ctwaClid: string;
   wabaId: string | null;
+  phoneNumberId: string | null;
   sourceId: string | null;
   sourceUrl: string | null;
   sourceType: string | null;
@@ -21,8 +22,8 @@ export type CtwaSessionRow = {
 export async function getCtwaSessionsByPhone(
   rawPhone: string,
 ): Promise<CtwaSessionRow[]> {
-  const e164 = parseToE164(rawPhone);
-  if (!e164) return [];
+  const phoneKey = contactPhoneKeyFromRaw(rawPhone);
+  if (!phoneKey) return [];
 
   const rows = await db
     .select({
@@ -31,6 +32,7 @@ export async function getCtwaSessionsByPhone(
       contactName: contacts.name,
       ctwaClid: ctwaSessions.ctwaClid,
       wabaId: ctwaSessions.wabaId,
+      phoneNumberId: ctwaSessions.phoneNumberId,
       sourceId: ctwaSessions.sourceId,
       sourceUrl: ctwaSessions.sourceUrl,
       sourceType: ctwaSessions.sourceType,
@@ -38,7 +40,7 @@ export async function getCtwaSessionsByPhone(
     })
     .from(ctwaSessions)
     .innerJoin(contacts, eq(ctwaSessions.contactId, contacts.id))
-    .where(eq(contacts.phoneNumber, e164))
+    .where(eq(contacts.phoneNumber, phoneKey))
     .orderBy(desc(ctwaSessions.sendTime));
 
   return rows.map((r) => ({
@@ -47,6 +49,7 @@ export async function getCtwaSessionsByPhone(
     contactName: r.contactName,
     ctwaClid: r.ctwaClid,
     wabaId: r.wabaId,
+    phoneNumberId: r.phoneNumberId,
     sourceId: r.sourceId,
     sourceUrl: r.sourceUrl,
     sourceType: r.sourceType,

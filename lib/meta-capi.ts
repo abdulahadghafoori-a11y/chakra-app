@@ -3,9 +3,8 @@
  *
  * Docs: https://developers.facebook.com/docs/marketing-api/conversions-api
  *
- * Alternative (often simpler operationally): use YCloud’s Custom Event / forwarding so YCloud
- * calls Meta with your dataset id + access token, and this app only records orders in Postgres.
- * Switch by removing `sendMetaPurchaseEvent` from the server action and wiring YCloud’s UI instead.
+ * Inbound CTWA context comes from your own stack: configure the WhatsApp **messages** webhook
+ * directly on the Meta app (see `app/api/webhooks/whatsapp`) — same JSON shape as Meta’s docs.
  */
 
 import {
@@ -45,7 +44,7 @@ export type MetaPurchaseParams = {
   /** CTWA click id — omitted from user_data when null/empty. */
   ctwaClid: string | null;
   /**
-   * Meta WABA from the CTWA session (YCloud `wabaId`). Falls back to
+   * Meta WABA from the CTWA session (`entry.id` from webhooks). Falls back to
    * `META_WHATSAPP_BUSINESS_ACCOUNT_ID` when null/empty.
    */
   whatsappBusinessAccountId: string | null;

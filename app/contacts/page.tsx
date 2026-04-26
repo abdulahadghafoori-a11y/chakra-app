@@ -112,7 +112,7 @@ export default async function ContactsPage({
                   >
                     {q
                       ? "No contacts match this search."
-                      : "No contacts yet. Inbound WhatsApp (YCloud) will create them."}
+                      : "No contacts yet. WhatsApp CTWA webhooks will create them."}
                   </TableCell>
                 </TableRow>
               ) : (
