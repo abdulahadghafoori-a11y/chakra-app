@@ -4,9 +4,11 @@ import { kabulDateTimeLocalToDate } from "@/lib/kabul-time";
 
 export const orderStatuses = [
   "pending",
-  "paid",
+  "confirmed",
   "shipped",
+  "paid",
   "cancelled",
+  "returned",
 ] as const;
 
 export const APP_CURRENCY = "USD" as const;
@@ -40,6 +42,9 @@ const capiEventTimeKabulField = z
     { message: "Invalid date and time" },
   );
 
+/** Non-negative delivery cost; stored on `orders.delivery_cost`, not in CAPI payload. */
+const orderDeliveryCostField = z.number().min(0, "Cannot be negative");
+
 export const createOrderSchema = z.object({
   phone: z.string().min(6),
   ctwaSessionId: ctwaSessionIdField,
@@ -47,6 +52,7 @@ export const createOrderSchema = z.object({
   orderId: z.string().optional(),
   status: z.enum(orderStatuses),
   capiEventTimeKabul: capiEventTimeKabulField,
+  deliveryCost: orderDeliveryCostField,
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;

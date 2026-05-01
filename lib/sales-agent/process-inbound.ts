@@ -16,6 +16,7 @@ import type { InboundTextMessage } from "@/lib/inbound-text-messages";
 import { sendWhatsAppText } from "@/lib/whatsapp-send";
 
 import { HANDOFF_REPLY_DARI, shouldHandOffToHuman } from "./handoff";
+import { ensureConversationProfile } from "./profile";
 import { runSalesAgentReply } from "./run";
 
 export function isSalesAgentEnabled(): boolean {
@@ -76,6 +77,7 @@ async function getOrCreateConversationForInbound(msg: InboundTextMessage) {
     }
     row = await loadConversationByWaId(waIdDigits);
     if (!row) throw new Error("conversation disappeared after update");
+    await ensureConversationProfile(row.id);
     return row;
   }
 
@@ -115,6 +117,7 @@ async function getOrCreateConversationForInbound(msg: InboundTextMessage) {
     .returning();
 
   if (!created) throw new Error("conversation insert failed");
+  await ensureConversationProfile(created.id);
   return created;
 }
 
@@ -157,15 +160,25 @@ export async function processInboundTextForSalesAgent(
       target: conversationMessages.providerMessageId,
     });
 
-  if (conv.status === "handoff") {
+  if (conv.status === "handoff" || conv.stage === "handoff") {
     await markInboundComplete(wamid);
     return { outcome: "skipped", detail: "conversation_handoff" };
+  }
+
+  if (conv.stage === "closed") {
+    await markInboundComplete(wamid);
+    return { outcome: "skipped", detail: "conversation_closed" };
   }
 
   if (shouldHandOffToHuman(msg.textBody)) {
     await db
       .update(conversations)
-      .set({ status: "handoff" })
+      .set({
+        status: "handoff",
+        stage: "handoff",
+        handoffReason: "keyword_operator_request",
+        handoffAt: new Date(),
+      })
       .where(eq(conversations.id, conv.id));
 
     if (sendOutbound) {
@@ -192,7 +205,20 @@ export async function processInboundTextForSalesAgent(
     return { outcome: "ok", detail: "handoff" };
   }
 
-  const replyText = await runSalesAgentReply(conv.id);
+  let replyText = await runSalesAgentReply(conv.id);
+  if (!replyText.trim()) {
+    const [after] = await db
+      .select({ status: conversations.status })
+      .from(conversations)
+      .where(eq(conversations.id, conv.id))
+      .limit(1);
+    if (after?.status === "handoff") {
+      replyText = HANDOFF_REPLY_DARI;
+    } else {
+      replyText =
+        "متأسفانه الان پاسخی ندارم. دوباره بنویسید یا «اپراتور» بفرستید.";
+    }
+  }
 
   if (sendOutbound) {
     const send = await sendWhatsAppText({

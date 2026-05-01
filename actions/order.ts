@@ -349,6 +349,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       status: data.status,
       capiSent: !skipCapi,
       capiEventId: skipCapi ? null : eventId,
+      deliveryCost: data.deliveryCost.toFixed(4),
+      returnCost: "0",
+      codFee: "0",
       createdAt: orderEventAt,
       updatedAt: orderEventAt,
     })
@@ -365,14 +368,21 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   try {
     await db.insert(orderItems).values(
-      resolved.map((r, lineIndex) => ({
-        orderId: inserted.id,
-        lineIndex,
-        productId: r.product.id,
-        quantity: r.quantity,
-        unitSalePrice: r.unit.toFixed(4),
-        lineValue: r.lineValue.toFixed(4),
-      })),
+      resolved.map((r, lineIndex) => {
+        const unitCogs = Number(r.product.cogs);
+        const safeUnitCogs = Number.isFinite(unitCogs) ? unitCogs : 0;
+        const lineCogs = safeUnitCogs * r.quantity;
+        return {
+          orderId: inserted.id,
+          lineIndex,
+          productId: r.product.id,
+          quantity: r.quantity,
+          unitSalePrice: r.unit.toFixed(4),
+          lineValue: r.lineValue.toFixed(4),
+          unitCogs: safeUnitCogs.toFixed(4),
+          lineCogs: lineCogs.toFixed(4),
+        };
+      }),
     );
   } catch (e) {
     console.error("[createOrder] order_items insert failed", e);
@@ -385,8 +395,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
-  revalidatePath("/");
+  revalidatePath("/campaigns");
+  revalidatePath("/orders");
   revalidatePath("/orders/new");
+  revalidatePath(`/orders/${orderPk}`);
   revalidatePath(`/orders/${orderPk}/confirmation`);
 
   return {

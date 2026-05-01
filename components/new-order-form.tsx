@@ -65,6 +65,7 @@ import {
   getDefaultKabulDateTimeLocal,
 } from "@/lib/kabul-time";
 import {
+  APP_CURRENCY,
   type NewOrderFormInput,
   newOrderFormSchema,
   orderStatuses,
@@ -137,6 +138,7 @@ export function NewOrderForm({
       lines: [defaultLine(products)],
       status: "paid",
       capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
+      deliveryCost: 0,
     },
   });
 
@@ -236,7 +238,12 @@ export function NewOrderForm({
       };
     });
     const total = lineRows.reduce((s, r) => s + r.lineTotal, 0);
-    return { ctwaSession, lineRows, total };
+    return {
+      ctwaSession,
+      lineRows,
+      total,
+      deliveryCost: reviewValues.deliveryCost,
+    };
   }, [reviewValues, products, sessions]);
 
   const isDevReviewUi = process.env.NODE_ENV === "development";
@@ -291,6 +298,7 @@ export function NewOrderForm({
           lines: [defaultLine(products)],
           status: "paid",
           capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
+          deliveryCost: 0,
         } satisfies FormValues);
       })();
     });
@@ -623,10 +631,53 @@ export function NewOrderForm({
                 <div className="text-right">
                   <p className="text-muted-foreground text-xs">Order total</p>
                   <p className="text-lg font-semibold tabular-nums">
-                    USD {orderTotal.toFixed(2)}
+                    {APP_CURRENCY} {orderTotal.toFixed(2)}
                   </p>
                 </div>
               </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Delivery cost
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                Optional. Saved as <code className="text-xs">delivery_cost</code>{" "}
+                on the order. Counts toward campaign operational cost when the
+                order is paid and attributed. There is no other way to set this
+                in the app after the order exists.
+              </p>
+              <FormField
+                control={form.control}
+                name="deliveryCost"
+                render={({ field }) => (
+                  <FormItem className="max-w-xs">
+                    <FormLabel className="text-xs">
+                      Delivery ({APP_CURRENCY})
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        className="h-9 font-mono text-sm tabular-nums"
+                        min={0}
+                        step="0.01"
+                        type="number"
+                        value={field.value}
+                        onBlur={field.onBlur}
+                        onChange={(e) =>
+                          field.onChange(
+                            Number.parseFloat(e.target.value || "0"),
+                          )
+                        }
+                        name={field.name}
+                        ref={field.ref}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
 
             <Separator />
@@ -967,6 +1018,15 @@ export function NewOrderForm({
                         </TableFooter>
                       </Table>
                     )}
+                    <div className="bg-muted/40 mt-3 rounded-lg border px-3 py-2 text-xs">
+                      <p className="text-muted-foreground font-medium tracking-wide uppercase">
+                        Delivery cost (saved on order · not in CAPI)
+                      </p>
+                      <p className="mt-2 tabular-nums font-medium">
+                        {APP_CURRENCY}{" "}
+                        {reviewSummary.deliveryCost.toFixed(2)}
+                      </p>
+                    </div>
                     <p className="text-muted-foreground mt-2 text-xs">
                       Payment status{" "}
                       <span className="font-medium text-foreground capitalize">

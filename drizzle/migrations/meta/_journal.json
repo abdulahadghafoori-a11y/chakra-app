@@ -120,6 +120,62 @@
       "when": 1776563963500,
       "tag": "0016_conversation_messages_wamid_unique_full",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1776563963600,
+      "tag": "0017_sales_agent_professional",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1776563963700,
+      "tag": "0018_editable_sales_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1776563963800,
+      "tag": "0019_meta_ads_dimensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1776563963900,
+      "tag": "0020_staff_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1776563964000,
+      "tag": "0021_order_items_cogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1776563964100,
+      "tag": "0022_orders_operational_costs",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1776563964200,
+      "tag": "0023_ad_insights_messaging_purchases",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1776563964300,
+      "tag": "0024_order_and_business_expenses",
+      "breakpoints": true
     }
   ]
 }

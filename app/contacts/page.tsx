@@ -12,10 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  CONTACTS_PAGE_SIZE,
-  listContactsWithStats,
-} from "@/lib/contacts-list";
+import { listContactsWithStats } from "@/lib/contacts-list";
 import { getPhonePresentation } from "@/lib/phone-display";
 
 export const dynamic = "force-dynamic";
@@ -63,8 +60,6 @@ export default async function ContactsPage({
     p.set("page", String(page));
     redirect(`/contacts?${p.toString()}`);
   }
-
-  const pageCount = Math.max(1, Math.ceil(total / CONTACTS_PAGE_SIZE));
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 sm:space-y-6">

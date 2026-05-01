@@ -1,8 +1,10 @@
 import { desc } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   primaryKey,
@@ -29,12 +31,112 @@ export const contacts = pgTable(
   (t) => [uniqueIndex("contacts_phone_number_unique").on(t.phoneNumber)],
 );
 
+/** Dashboard staff sign-in (/sales, /campaigns). Created via scripts/create-staff-user.mjs. */
+export const staffUsers = pgTable(
+  "staff_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [uniqueIndex("staff_users_email_unique").on(t.email)],
+);
+
+/** Meta Ads dimension: campaign (Marketing API id as PK). */
+export const metaCampaigns = pgTable("meta_campaigns", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  objective: text("objective"),
+  status: text("status"),
+  effectiveStatus: text("effective_status"),
+  syncedAt: timestamp("synced_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/** Meta ad set under a campaign. */
+export const metaAdSets = pgTable(
+  "meta_ad_sets",
+  {
+    id: text("id").primaryKey(),
+    metaCampaignId: text("meta_campaign_id")
+      .notNull()
+      .references(() => metaCampaigns.id, { onDelete: "cascade" }),
+    name: text("name"),
+    status: text("status"),
+    effectiveStatus: text("effective_status"),
+    syncedAt: timestamp("synced_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("meta_ad_sets_meta_campaign_id_idx").on(t.metaCampaignId)],
+);
+
+/** Meta ad under an ad set (CTWA `source_id` is this id when it is an ad). */
+export const metaAds = pgTable(
+  "meta_ads",
+  {
+    id: text("id").primaryKey(),
+    metaAdSetId: text("meta_ad_set_id")
+      .notNull()
+      .references(() => metaAdSets.id, { onDelete: "cascade" }),
+    metaCampaignId: text("meta_campaign_id")
+      .notNull()
+      .references(() => metaCampaigns.id, { onDelete: "cascade" }),
+    name: text("name"),
+    status: text("status"),
+    effectiveStatus: text("effective_status"),
+    syncedAt: timestamp("synced_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("meta_ads_meta_ad_set_id_idx").on(t.metaAdSetId),
+    index("meta_ads_meta_campaign_id_idx").on(t.metaCampaignId),
+  ],
+);
+
+/** Daily ad-level insights (spend, etc.) from Marketing API. */
+export const adInsightsDaily = pgTable(
+  "ad_insights_daily",
+  {
+    insightDate: date("insight_date", { mode: "string" }).notNull(),
+    metaAdId: text("meta_ad_id")
+      .notNull()
+      .references(() => metaAds.id, { onDelete: "cascade" }),
+    metaAdSetId: text("meta_ad_set_id"),
+    metaCampaignId: text("meta_campaign_id"),
+    spend: numeric("spend", { precision: 16, scale: 4 }).notNull().default("0"),
+    impressions: integer("impressions").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    /** Meta Ads Insights `actions` — messaging conversations started (incl. CTWA). */
+    messagingConversationsStarted: integer("messaging_conversations_started")
+      .notNull()
+      .default(0),
+    /** Meta Ads Insights `actions` — purchase-related conversions (optimization signal). */
+    metaPurchases: integer("meta_purchases").notNull().default(0),
+    currency: text("currency").notNull().default("USD"),
+    syncedAt: timestamp("synced_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.insightDate, t.metaAdId] }),
+    index("ad_insights_daily_meta_campaign_id_idx").on(t.metaCampaignId),
+    index("ad_insights_daily_insight_date_idx").on(t.insightDate),
+  ],
+);
+
 /**
  * One row per CTWA referral session (unique on contact + clid + send_time).
  * `send_time` is the earliest of message send vs envelope time (and legacy ingest time on migrate).
  * Phone and display name live on `contacts` via `contact_id`.
  * `waba_id` is Meta WhatsApp Business Account id (`entry.id` on Cloud API webhooks).
  * `phone_number_id` is Cloud API `metadata.phone_number_id` for the receiving number.
+ * `meta_ad_id` links to synced Meta ad when `source_id` is the ad id.
  */
 export const ctwaSessions = pgTable(
   "ctwa_sessions",
@@ -50,10 +152,14 @@ export const ctwaSessions = pgTable(
     sourceUrl: text("source_url"),
     sourceType: text("source_type"),
     sendTime: timestamp("send_time", { withTimezone: true }).notNull(),
+    metaAdId: text("meta_ad_id").references(() => metaAds.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     index("ctwa_sessions_contact_id_idx").on(t.contactId),
     index("ctwa_sessions_ctwa_clid_idx").on(t.ctwaClid),
+    index("ctwa_sessions_meta_ad_id_idx").on(t.metaAdId),
     uniqueIndex("ctwa_sessions_contact_ctwa_send_unique").on(
       t.contactId,
       t.ctwaClid,
@@ -76,6 +182,16 @@ export const conversations = pgTable(
     phoneNumberId: text("phone_number_id"),
     /** `bot` | `handoff` — handoff stops automated replies. */
     status: text("status").notNull().default("bot"),
+    /**
+     * Sales funnel: new | discovering | recommending | objection_handling |
+     * confirming_order | ready_for_human_order | closed
+     */
+    stage: text("stage").notNull().default("new"),
+    leadScore: text("lead_score"),
+    handoffReason: text("handoff_reason"),
+    handoffAt: timestamp("handoff_at", { withTimezone: true }),
+    /** Rolling summary for long threads (optional). */
+    conversationSummary: text("conversation_summary"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -87,6 +203,79 @@ export const conversations = pgTable(
   (t) => [
     index("conversations_wa_id_idx").on(t.waId),
     index("conversations_contact_id_idx").on(t.contactId),
+    index("conversations_stage_idx").on(t.stage),
+    index("conversations_lead_score_idx").on(t.leadScore),
+  ],
+);
+
+/** Structured customer facts for the sales agent (one row per conversation). */
+export const conversationProfiles = pgTable(
+  "conversation_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    customerName: text("customer_name"),
+    city: text("city"),
+    addressNote: text("address_note"),
+    /** Comma-separated product UUIDs or JSON array as text. */
+    interestedProductIds: text("interested_product_ids"),
+    budgetBand: text("budget_band"),
+    urgency: text("urgency"),
+    trustObjection: boolean("trust_objection").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("conversation_profiles_conversation_id_unique").on(
+      t.conversationId,
+    ),
+    index("conversation_profiles_conversation_id_idx").on(t.conversationId),
+  ],
+);
+
+/** Draft cart / order intent before human or final createOrder. */
+export const salesDraftOrders = pgTable(
+  "sales_draft_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    payload: jsonb("payload").notNull().default({}),
+    status: text("status").notNull().default("draft"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("sales_draft_orders_conversation_id_idx").on(t.conversationId)],
+);
+
+/** Deduped Meta CAPI funnel events (Lead, ViewContent, AddToCart). */
+export const agentEvents = pgTable(
+  "agent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    eventName: text("event_name").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+    metadata: jsonb("metadata"),
+  },
+  (t) => [
+    uniqueIndex("agent_events_conversation_dedupe_unique").on(
+      t.conversationId,
+      t.dedupeKey,
+    ),
+    index("agent_events_conversation_id_idx").on(t.conversationId),
   ],
 );
 
@@ -126,6 +315,30 @@ export const salesAgentInboundComplete = pgTable(
   },
 );
 
+/** Editable Dari (or mixed) articles for store policies and general business info — used by sales agent tools. */
+export const businessKnowledge = pgTable(
+  "business_knowledge",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    title: text("title"),
+    body: text("body").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("business_knowledge_slug_unique").on(t.slug),
+    index("business_knowledge_slug_idx").on(t.slug),
+    index("business_knowledge_sort_idx").on(t.sortOrder),
+  ],
+);
+
 export const products = pgTable(
   "products",
   {
@@ -138,6 +351,15 @@ export const products = pgTable(
     }).notNull(),
     cogs: numeric("cogs", { precision: 14, scale: 4 }).notNull().default("0"),
     description: text("description"),
+    /** Structured specs for agent answers (e.g. dimensions, model). Editable via /products/.../agent. */
+    specsJson: jsonb("specs_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    /** FAQ entries for this SKU: `[{ "q": "...", "a": "..." }, ...]`. */
+    faqJson: jsonb("faq_json").$type<unknown[]>().notNull().default([]),
+    /** Long-form agent-facing notes (Dari): warranty detail, what is in the box, compatibility. */
+    knowledgeNotes: text("knowledge_notes"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -164,6 +386,16 @@ export const orders = pgTable(
     status: text("status").notNull(),
     capiSent: boolean("capi_sent").notNull().default(false),
     capiEventId: text("capi_event_id"),
+    /** Optional: delivery / RTO / COD handling costs for contribution math (COD campaigns). */
+    deliveryCost: numeric("delivery_cost", { precision: 14, scale: 4 })
+      .notNull()
+      .default("0"),
+    returnCost: numeric("return_cost", { precision: 14, scale: 4 })
+      .notNull()
+      .default("0"),
+    codFee: numeric("cod_fee", { precision: 14, scale: 4 })
+      .notNull()
+      .default("0"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -196,6 +428,13 @@ export const orderItems = pgTable(
       scale: 4,
     }).notNull(),
     lineValue: numeric("line_value", { precision: 14, scale: 4 }).notNull(),
+    /** Snapshot of product COGS at order time (campaign profit rollups). */
+    unitCogs: numeric("unit_cogs", { precision: 14, scale: 4 })
+      .notNull()
+      .default("0"),
+    lineCogs: numeric("line_cogs", { precision: 14, scale: 4 })
+      .notNull()
+      .default("0"),
   },
   (t) => [
     primaryKey({ columns: [t.orderId, t.lineIndex] }),
@@ -203,11 +442,57 @@ export const orderItems = pgTable(
   ],
 );
 
+/** Per-order expenses (e.g. inter-province delivery). Not the same as orders.deliveryCost — avoid double entry. */
+export const orderExpenses = pgTable(
+  "order_expenses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("order_expenses_order_id_idx").on(t.orderId)],
+);
+
+/** General overhead (rent, electricity) — not tied to an order; excluded from campaign rollups in v1. */
+export const businessExpenses = pgTable(
+  "business_expenses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    category: text("category").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    note: text("note"),
+    incurredDate: date("incurred_date", { mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("business_expenses_incurred_date_idx").on(t.incurredDate)],
+);
+
 export type Conversation = typeof conversations.$inferSelect;
 export type ConversationMessage = typeof conversationMessages.$inferSelect;
+export type ConversationProfile = typeof conversationProfiles.$inferSelect;
+export type SalesDraftOrder = typeof salesDraftOrders.$inferSelect;
+export type AgentEvent = typeof agentEvents.$inferSelect;
+export type BusinessKnowledge = typeof businessKnowledge.$inferSelect;
 
 export type Contact = typeof contacts.$inferSelect;
+export type MetaCampaign = typeof metaCampaigns.$inferSelect;
+export type MetaAdSet = typeof metaAdSets.$inferSelect;
+export type MetaAd = typeof metaAds.$inferSelect;
+export type AdInsightDaily = typeof adInsightsDaily.$inferSelect;
 export type CtwaSession = typeof ctwaSessions.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type OrderExpense = typeof orderExpenses.$inferSelect;
+export type BusinessExpense = typeof businessExpenses.$inferSelect;

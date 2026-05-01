@@ -26,6 +26,9 @@ const schema = z.object({
   defaultSalePrice: z.number().positive(),
   cogs: z.number().nonnegative(),
   description: z.string().optional(),
+  knowledgeNotes: z.string().optional(),
+  specsJsonText: z.string().optional(),
+  faqJsonText: z.string().optional(),
 });
 
 type Values = z.infer<typeof schema>;
@@ -39,6 +42,9 @@ export function ProductForm() {
       defaultSalePrice: 1,
       cogs: 0,
       description: "",
+      knowledgeNotes: "",
+      specsJsonText: "",
+      faqJsonText: "",
     },
   });
 
@@ -56,6 +62,9 @@ export function ProductForm() {
           defaultSalePrice: 1,
           cogs: 0,
           description: "",
+          knowledgeNotes: "",
+          specsJsonText: "",
+          faqJsonText: "",
         });
       })();
     });
@@ -135,6 +144,62 @@ export function ProductForm() {
               <FormLabel>Description</FormLabel>
               <FormControl>
                 <Textarea placeholder="Optional" rows={3} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="knowledgeNotes"
+          render={({ field }) => (
+            <FormItem className="sm:col-span-2">
+              <FormLabel>Agent knowledge notes (optional)</FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="Long Dari notes: warranty, in-box, compatibility…"
+                  rows={4}
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>
+                Also editable later under Products → Agent.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="specsJsonText"
+          render={({ field }) => (
+            <FormItem className="sm:col-span-2">
+              <FormLabel>specs JSON object (optional)</FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="{}"
+                  rows={4}
+                  className="font-mono text-xs"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="faqJsonText"
+          render={({ field }) => (
+            <FormItem className="sm:col-span-2">
+              <FormLabel>FAQ JSON array (optional)</FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder='[{"q":"…","a":"…"}]'
+                  rows={4}
+                  className="font-mono text-xs"
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>

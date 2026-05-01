@@ -27,8 +27,10 @@ const KEYS = [
   "SALES_AGENT_ENABLED",
   "SALES_AGENT_SEND_WHATSAPP",
   "SALES_AGENT_UPSERT_CONTACT",
+  "SALES_AGENT_BRAND_NAME",
   "OPENAI_API_KEY",
   "OPENAI_MODEL",
+  "AUTH_SECRET",
 ];
 
 /** Preview env in Vercel CLI requires a git branch (or use Dashboard → Preview → “All branches”). */

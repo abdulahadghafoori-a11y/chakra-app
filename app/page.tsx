@@ -1,186 +1,207 @@
-import { desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 
-import { Badge } from "@/components/ui/badge";
+import { OrdersListTable } from "@/components/orders-list-table";
+import { buttonVariants } from "@/components/ui/button";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { getDashboardSummary } from "@/lib/dashboard-summary";
 import {
-  contacts,
-  ctwaSessions,
-  orderItems,
-  orders,
-  products,
-} from "@/drizzle/schema";
-import { db } from "@/lib/db";
+  groupLinesByOrderId,
+  loadOrderLineSummaries,
+  loadOrdersTableRows,
+} from "@/lib/orders-list";
+import { getStaffSessionOptional } from "@/lib/staff-auth/guard";
+import { APP_CURRENCY } from "@/lib/validations/order";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-function formatOrderWhen(d: Date) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  } catch {
-    return d.toISOString();
-  }
+function moneyLabel(raw: string) {
+  const n = Number.parseFloat(raw);
+  if (Number.isNaN(n)) return raw;
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 type SearchParams = { contactId?: string };
 
-export default async function DashboardPage({
+export default async function HomePage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  const session = await getStaffSessionOptional();
+
+  if (!session) {
+    return (
+      <div className="mx-auto flex max-w-lg flex-col gap-8 py-12 sm:py-16">
+        <div className="space-y-3 text-center sm:text-left">
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Chakra App
+          </h1>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            WhatsApp orders, Click-to-WhatsApp attribution, and Meta Conversions
+            API. Sign in to manage the store, or create an order without an
+            account.
+          </p>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-center sm:gap-4">
+          <Link
+            href="/login"
+            className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-auto")}
+          >
+            Log in
+          </Link>
+          <Link
+            href="/orders/new"
+            className={cn(
+              buttonVariants({ variant: "outline", size: "lg" }),
+              "w-full sm:w-auto",
+            )}
+          >
+            Create order
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const { contactId } = await searchParams;
   const filterContactId = contactId?.trim() || undefined;
 
-  const orderListBase = db
-    .select({
-      id: orders.id,
-      phone: contacts.phoneNumber,
-      contactId: contacts.id,
-      ctwa: ctwaSessions.ctwaClid,
-      value: orders.value,
-      currency: orders.currency,
-      capiSent: orders.capiSent,
-      createdAt: orders.createdAt,
-    })
-    .from(orders)
-    .innerJoin(contacts, eq(orders.contactId, contacts.id))
-    .leftJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id));
+  const [summary, orderRows] = await Promise.all([
+    getDashboardSummary(),
+    loadOrdersTableRows({ limit: 10, filterContactId }),
+  ]);
 
-  const orderRows = await (filterContactId
-    ? orderListBase.where(eq(orders.contactId, filterContactId))
-    : orderListBase
-  )
-    .orderBy(desc(orders.createdAt))
-    .limit(50);
-
-  const orderIds = orderRows.map((o) => o.id);
-  const itemRows =
-    orderIds.length === 0
-      ? []
-      : await db
-          .select({
-            orderId: orderItems.orderId,
-            productName: products.name,
-            quantity: orderItems.quantity,
-            lineValue: orderItems.lineValue,
-          })
-          .from(orderItems)
-          .innerJoin(products, eq(orderItems.productId, products.id))
-          .where(inArray(orderItems.orderId, orderIds));
-
-  const itemsByOrder = new Map<string, typeof itemRows>();
-  for (const row of itemRows) {
-    const list = itemsByOrder.get(row.orderId) ?? [];
-    list.push(row);
-    itemsByOrder.set(row.orderId, list);
-  }
+  const itemRows = await loadOrderLineSummaries(orderRows.map((o) => o.id));
+  const itemsByOrder = groupLinesByOrderId(itemRows);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4">
+    <div className="mx-auto w-full max-w-5xl space-y-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-          Recent orders
+          Dashboard
         </h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Latest purchases and whether Meta CAPI received the event.
+          Overview of orders, revenue ({APP_CURRENCY}), and Meta CAPI status.
         </p>
-        {filterContactId && orderRows[0] ? (
-          <p className="mt-2 text-sm">
-            <span className="text-muted-foreground">Filtered by contact</span>{" "}
-            <span className="font-mono text-xs">{orderRows[0].phone}</span> ·{" "}
-            <Link
-              className="text-primary underline underline-offset-2"
-              href="/"
-            >
-              Clear filter
-            </Link>
-          </p>
-        ) : filterContactId && orderRows.length === 0 ? (
-          <p className="mt-2 text-sm">
-            <span className="text-muted-foreground">
-              No orders for this contact yet.
-            </span>{" "}
-            <Link className="underline underline-offset-2" href="/">
-              Show all orders
-            </Link>
-          </p>
-        ) : null}
       </div>
-      <div className="-mx-3 overflow-x-auto sm:mx-0">
-        <div className="inline-block min-w-full overflow-hidden rounded-xl border align-middle">
-        <Table className="min-w-[36rem]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Phone</TableHead>
-              <TableHead>CTWA</TableHead>
-              <TableHead>Products</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead>CAPI</TableHead>
-              <TableHead className="text-right">Date</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {orderRows.length === 0 ? (
-              <TableRow>
-                <TableCell className="text-muted-foreground" colSpan={6}>
-                  No orders yet. Create products, then record an order.
-                </TableCell>
-              </TableRow>
-            ) : (
-              orderRows.map((r) => {
-                const items = itemsByOrder.get(r.id) ?? [];
-                const productSummary =
-                  items.length === 0
-                    ? "—"
-                    : items
-                        .map(
-                          (it) =>
-                            `${it.productName} × ${it.quantity}`,
-                        )
-                        .join(", ");
 
-                return (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">{r.phone}</TableCell>
-                    <TableCell className="max-w-[200px] truncate font-mono text-xs">
-                      {r.ctwa ?? "—"}
-                    </TableCell>
-                    <TableCell className="max-w-[320px] text-sm">
-                      <span className="line-clamp-2" title={productSummary}>
-                        {productSummary}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {r.currency} {String(r.value)}
-                    </TableCell>
-                    <TableCell>
-                      {r.capiSent ? (
-                        <Badge variant="default">sent</Badge>
-                      ) : (
-                        <Badge variant="secondary">pending</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap text-right text-xs">
-                      {formatOrderWhen(r.createdAt)}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total orders</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {summary.orderCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            All time
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Revenue ({APP_CURRENCY})</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {moneyLabel(summary.revenuePrimaryCurrency)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Sum of orders in {APP_CURRENCY} only
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Contacts</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {summary.contactsCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Known WhatsApp / phone identities
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>CAPI pending</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {summary.pendingCapiCount}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Orders not yet marked sent to Meta
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Last 7 days</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {summary.ordersLast7Days} orders
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {APP_CURRENCY}{" "}
+            {moneyLabel(summary.revenueLast7DaysPrimary)} in same period
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Quick link</CardDescription>
+            <CardTitle className="text-base font-medium">
+              <Link
+                className="text-primary underline-offset-4 hover:underline"
+                href="/orders"
+              >
+                View all orders
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Full list and new order
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Overhead</CardDescription>
+            <CardTitle className="text-base font-medium">
+              <Link
+                className="text-primary underline-offset-4 hover:underline"
+                href="/expenses"
+              >
+                Business expenses
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Rent, utilities, and other non-order costs
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold tracking-tight">Recent orders</h2>
+        <p className="text-muted-foreground text-sm">
+          Latest 10{filterContactId ? " (filtered)" : ""}.{" "}
+          <Link
+            className="text-primary underline-offset-2 hover:underline"
+            href="/orders"
+          >
+            Open orders page
+          </Link>
+        </p>
+        <OrdersListTable
+          rows={orderRows}
+          itemsByOrder={itemsByOrder}
+          filterContactId={filterContactId}
+        />
       </div>
     </div>
   );

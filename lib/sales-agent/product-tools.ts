@@ -19,12 +19,30 @@ function formatUsd(amount: string | null | undefined): string {
   }).format(n);
 }
 
+function hasExtendedKnowledge(row: {
+  knowledgeNotes: string | null;
+  faqJson: unknown;
+  specsJson: Record<string, unknown>;
+}): boolean {
+  if (row.knowledgeNotes?.trim()) return true;
+  if (Array.isArray(row.faqJson) && row.faqJson.length > 0) return true;
+  return Object.keys(row.specsJson ?? {}).length > 0;
+}
+
 export type ProductSearchHit = {
   id: string;
   name: string;
   sku: string;
   priceUsd: string;
   description: string | null;
+  has_extended_knowledge: boolean;
+  knowledge_excerpt: string | null;
+};
+
+export type ProductDetailHit = ProductSearchHit & {
+  specs_json: Record<string, unknown>;
+  faq_json: unknown[];
+  knowledge_notes: string | null;
 };
 
 export async function executeSearchProducts(
@@ -43,6 +61,9 @@ export async function executeSearchProducts(
       sku: products.sku,
       defaultSalePrice: products.defaultSalePrice,
       description: products.description,
+      knowledgeNotes: products.knowledgeNotes,
+      faqJson: products.faqJson,
+      specsJson: products.specsJson,
     })
     .from(products)
     .where(
@@ -50,23 +71,36 @@ export async function executeSearchProducts(
         ilike(products.name, pattern),
         ilike(products.sku, pattern),
         ilike(products.description, pattern),
+        ilike(products.knowledgeNotes, pattern),
       ),
     )
     .orderBy(asc(products.name))
     .limit(Math.min(Math.max(limit, 1), 25));
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    sku: r.sku,
-    priceUsd: formatUsd(r.defaultSalePrice),
-    description: r.description ?? null,
-  }));
+  return rows.map((r) => {
+    const ext = hasExtendedKnowledge({
+      knowledgeNotes: r.knowledgeNotes,
+      faqJson: r.faqJson,
+      specsJson: r.specsJson as Record<string, unknown>,
+    });
+    const kn = r.knowledgeNotes?.trim() ?? "";
+    const excerpt =
+      kn.length > 220 ? `${kn.slice(0, 220)}…` : kn.length ? kn : null;
+    return {
+      id: r.id,
+      name: r.name,
+      sku: r.sku,
+      priceUsd: formatUsd(r.defaultSalePrice),
+      description: r.description ?? null,
+      has_extended_knowledge: ext,
+      knowledge_excerpt: excerpt,
+    };
+  });
 }
 
 export async function executeGetProduct(
   productId: string,
-): Promise<ProductSearchHit | null> {
+): Promise<ProductDetailHit | null> {
   const id = productId?.trim() ?? "";
   if (!id) return null;
 
@@ -77,6 +111,9 @@ export async function executeGetProduct(
       sku: products.sku,
       defaultSalePrice: products.defaultSalePrice,
       description: products.description,
+      specsJson: products.specsJson,
+      faqJson: products.faqJson,
+      knowledgeNotes: products.knowledgeNotes,
     })
     .from(products)
     .where(eq(products.id, id))
@@ -84,12 +121,28 @@ export async function executeGetProduct(
 
   if (!row) return null;
 
+  const specs = (row.specsJson ?? {}) as Record<string, unknown>;
+  const faq = Array.isArray(row.faqJson) ? row.faqJson : [];
+
   return {
     id: row.id,
     name: row.name,
     sku: row.sku,
     priceUsd: formatUsd(row.defaultSalePrice),
     description: row.description ?? null,
+    has_extended_knowledge: hasExtendedKnowledge({
+      knowledgeNotes: row.knowledgeNotes,
+      faqJson: faq,
+      specsJson: specs,
+    }),
+    knowledge_excerpt: row.knowledgeNotes?.trim()
+      ? row.knowledgeNotes.length > 220
+        ? `${row.knowledgeNotes.slice(0, 220)}…`
+        : row.knowledgeNotes
+      : null,
+    specs_json: specs,
+    faq_json: faq,
+    knowledge_notes: row.knowledgeNotes?.trim() ? row.knowledgeNotes : null,
   };
 }
 

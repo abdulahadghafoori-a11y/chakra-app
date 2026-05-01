@@ -1,4 +1,7 @@
+import Link from "next/link";
+
 import { ProductForm } from "@/components/product-form";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -27,6 +30,7 @@ export default async function ProductsPage() {
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Products</h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
           Catalog used when creating orders and CAPI item payloads. All amounts are USD.
+          Use <strong>Agent</strong> to edit long product copy the WhatsApp sales agent may cite.
         </p>
       </div>
 
@@ -50,12 +54,13 @@ export default async function ProductsPage() {
               <TableHead className="text-right">Default sale</TableHead>
               <TableHead className="text-right">COGS</TableHead>
               <TableHead>Created</TableHead>
+              <TableHead className="w-[1%]"> </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {productRows.length === 0 ? (
               <TableRow>
-                <TableCell className="text-muted-foreground" colSpan={5}>
+                <TableCell className="text-muted-foreground" colSpan={6}>
                   No products yet.
                 </TableCell>
               </TableRow>
@@ -70,6 +75,14 @@ export default async function ProductsPage() {
                   <TableCell className="text-right">USD {p.cogs}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {p.createdAt}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Link
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                      href={`/products/${p.id}/agent`}
+                    >
+                      Agent
+                    </Link>
                   </TableCell>
                 </TableRow>
               ))

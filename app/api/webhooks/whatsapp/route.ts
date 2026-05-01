@@ -12,6 +12,8 @@
 
 import { NextResponse } from "next/server";
 
+import { and, eq } from "drizzle-orm";
+
 import { ctwaSessions } from "@/drizzle/schema";
 import {
   contactPhoneKeyFromRaw,
@@ -22,6 +24,7 @@ import { db } from "@/lib/db";
 import { extractInboundTextMessages } from "@/lib/inbound-text-messages";
 import { extractMetaInboundMessageJobs } from "@/lib/meta-whatsapp-webhook";
 import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbound";
+import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
 import { verifyWhatsAppWebhookPost } from "@/lib/webhook-signature";
 
 export const runtime = "nodejs";
@@ -115,6 +118,27 @@ export async function POST(request: Request) {
             ctwaSessions.sendTime,
           ],
         });
+
+      if (job.sourceId) {
+        const [sessionRow] = await db
+          .select({ id: ctwaSessions.id })
+          .from(ctwaSessions)
+          .where(
+            and(
+              eq(ctwaSessions.contactId, contact.id),
+              eq(ctwaSessions.ctwaClid, job.ctwaClid),
+              eq(ctwaSessions.sendTime, job.sendTime),
+            ),
+          )
+          .limit(1);
+        if (sessionRow?.id) {
+          try {
+            await linkCtwaSessionToMetaAd(sessionRow.id, job.sourceId);
+          } catch (e) {
+            console.error("[whatsapp webhook] CTWA meta link failed", e);
+          }
+        }
+      }
       ctwaProcessed++;
     } catch (e) {
       console.error("[whatsapp webhook] CTWA persist failed", e);
