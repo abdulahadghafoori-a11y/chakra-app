@@ -15,6 +15,7 @@ const authedNavLinks: { href: string; label: string }[] = [
   { href: "/expenses", label: "Expenses" },
   { href: "/products", label: "Products" },
   { href: "/campaigns", label: "Campaigns" },
+  { href: "/meta-engagement", label: "Meta comments" },
   { href: "/sales", label: "AI agent" },
 ];
 

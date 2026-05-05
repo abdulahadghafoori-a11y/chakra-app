@@ -164,7 +164,7 @@ export async function rollupAdInsightsDeliveryByCampaign(
 }
 
 /**
- * Sum delivery cost (`orders.delivery_cost`) for paid attributed orders in the window.
+ * Sum delivery cost (`orders.delivery_cost`) for paid + confirmed attributed orders in the window.
  */
 export async function rollupPaidOperationalCostsByCampaign(
   sinceIso: string,
@@ -176,7 +176,7 @@ export async function rollupPaidOperationalCostsByCampaign(
   const feeRows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
-      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} = 'paid'), 0)::text`,
+      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -208,6 +208,9 @@ export type OrderAggRow = {
   returnedOrdersCount: number;
   totalRevenue: number;
   paidRevenue: number;
+  /** Orders with status paid or confirmed — used with revenue/cogs for COD decisions. */
+  convertedOrdersCount: number;
+  convertedRevenue: number;
   capiSentCount: number;
 };
 
@@ -236,6 +239,10 @@ export async function rollupAttributedOrdersAggByCampaign(
         sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
+      convertedOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
+      convertedRevenue:
+        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
       capiSentCount:
         sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
     })
@@ -265,6 +272,8 @@ export async function rollupAttributedOrdersAggByCampaign(
       returnedOrdersCount: r.returnedOrdersCount,
       totalRevenue: num(r.totalRevenue),
       paidRevenue: num(r.paidRevenue),
+      convertedOrdersCount: r.convertedOrdersCount,
+      convertedRevenue: num(r.convertedRevenue),
       capiSentCount: r.capiSentCount,
     });
   }
@@ -281,6 +290,7 @@ export async function rollupLineCogsByCampaign(
     {
       totalLineCogs: number;
       paidLineCogs: number;
+      convertedLineCogs: number;
     }
   >
 > {
@@ -291,6 +301,8 @@ export async function rollupLineCogsByCampaign(
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric), 0)::text`,
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
+      convertedLineCogs:
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -306,12 +318,13 @@ export async function rollupLineCogsByCampaign(
 
   const m = new Map<
     string,
-    { totalLineCogs: number; paidLineCogs: number }
+    { totalLineCogs: number; paidLineCogs: number; convertedLineCogs: number }
   >();
   for (const r of rows) {
     m.set(r.metaCampaignId, {
       totalLineCogs: num(r.totalLineCogs),
       paidLineCogs: num(r.paidLineCogs),
+      convertedLineCogs: num(r.convertedLineCogs),
     });
   }
   return m;
@@ -320,6 +333,8 @@ export async function rollupLineCogsByCampaign(
 export type CampaignPerformanceRow = {
   metaCampaignId: string;
   campaignName: string | null;
+  /** Meta Ads Manager effective_status from last structure sync (ACTIVE, PAUSED, etc.). */
+  campaignEffectiveStatus: string | null;
   spend: number;
   ctwaSessions: number;
   ordersCount: number;
@@ -331,8 +346,12 @@ export type CampaignPerformanceRow = {
   returnedOrdersCount: number;
   totalRevenue: number;
   paidRevenue: number;
+  convertedOrdersCount: number;
+  convertedRevenue: number;
   totalLineCogs: number;
   paidLineCogs: number;
+  convertedLineCogs: number;
+  /** Delivery costs on paid + confirmed orders (COD cockpit). */
   paidOperationalCosts: number;
   impressions: number;
   clicks: number;
@@ -515,13 +534,15 @@ export async function getCampaignPerformanceRollups(
 
   for (const id of ids) {
     const cat = campaignLookup.get(id);
-    const st = cat?.effectiveStatus?.toUpperCase() ?? null;
-    if (st != null && st !== "ACTIVE") continue;
 
     const spend = spendMap.get(id) ?? 0;
     const ctwaSessionsCount = ctwaMap.get(id) ?? 0;
     const o = orderAggMap.get(id);
-    const cogs = cogsMap.get(id) ?? { totalLineCogs: 0, paidLineCogs: 0 };
+    const cogs = cogsMap.get(id) ?? {
+      totalLineCogs: 0,
+      paidLineCogs: 0,
+      convertedLineCogs: 0,
+    };
 
     const ordersCount = o?.ordersCount ?? 0;
     const paidOrdersCount = o?.paidOrdersCount ?? 0;
@@ -532,9 +553,12 @@ export async function getCampaignPerformanceRollups(
     const returnedOrdersCount = o?.returnedOrdersCount ?? 0;
     const totalRevenue = o?.totalRevenue ?? 0;
     const paidRevenue = o?.paidRevenue ?? 0;
+    const convertedOrdersCount = o?.convertedOrdersCount ?? 0;
+    const convertedRevenue = o?.convertedRevenue ?? 0;
     const capiSentCount = o?.capiSentCount ?? 0;
     const totalLineCogs = cogs.totalLineCogs;
     const paidLineCogs = cogs.paidLineCogs;
+    const convertedLineCogs = cogs.convertedLineCogs;
     const paidOperationalCosts = feesMap.get(id) ?? 0;
     const del = deliveryMap.get(id) ?? { impressions: 0, clicks: 0 };
     const impressions = del.impressions;
@@ -555,12 +579,12 @@ export async function getCampaignPerformanceRollups(
     const metaPurchases = metaAct.metaPurchases;
 
     const grossProfitPaid =
-      paidRevenue - paidLineCogs - paidOperationalCosts;
+      convertedRevenue - convertedLineCogs - paidOperationalCosts;
     const contributionProfit = grossProfitPaid - spend;
     const contributionRoas = spend > 0 ? contributionProfit / spend : null;
     const roasPaid =
-      spend > 0 && paidRevenue > 0
-        ? paidRevenue / spend
+      spend > 0 && convertedRevenue > 0
+        ? convertedRevenue / spend
         : spend > 0
           ? 0
           : null;
@@ -580,8 +604,11 @@ export async function getCampaignPerformanceRollups(
         pendingOrdersCount,
         totalRevenue,
         paidRevenue,
+        convertedOrdersCount,
+        convertedRevenue,
         totalLineCogs,
         paidLineCogs,
+        convertedLineCogs,
         paidOperationalCosts,
         capiSentCount,
         metaMessagingConversationsStarted,
@@ -596,6 +623,7 @@ export async function getCampaignPerformanceRollups(
     out.push({
       metaCampaignId: id,
       campaignName: o?.campaignName ?? cat?.name ?? null,
+      campaignEffectiveStatus: cat?.effectiveStatus ?? null,
       spend,
       ctwaSessions: ctwaSessionsCount,
       ordersCount,
@@ -607,8 +635,11 @@ export async function getCampaignPerformanceRollups(
       returnedOrdersCount,
       totalRevenue,
       paidRevenue,
+      convertedOrdersCount,
+      convertedRevenue,
       totalLineCogs,
       paidLineCogs,
+      convertedLineCogs,
       paidOperationalCosts,
       impressions,
       clicks,

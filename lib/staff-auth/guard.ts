@@ -18,6 +18,14 @@ export async function getStaffSessionOptional(): Promise<{
 
 /** Server actions: require valid staff JWT cookie. */
 export async function assertStaffSession(): Promise<void> {
+  await requireStaffSession();
+}
+
+/** Server actions: staff payload or throws (use for audit metadata). */
+export async function requireStaffSession(): Promise<{
+  sub: string;
+  email: string;
+}> {
   if (!isAuthSecretConfigured()) {
     throw new Error("AUTH_SECRET is not configured");
   }
@@ -26,4 +34,5 @@ export async function assertStaffSession(): Promise<void> {
   if (!payload) {
     throw new Error("Unauthorized");
   }
+  return payload;
 }

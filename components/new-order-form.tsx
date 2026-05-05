@@ -136,7 +136,7 @@ export function NewOrderForm({
       phone: initialPhone?.trim() ?? "",
       ctwaSessionId: "",
       lines: [defaultLine(products)],
-      status: "paid",
+      status: "confirmed",
       capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
       deliveryCost: 0,
     },
@@ -286,17 +286,31 @@ export function NewOrderForm({
         setReviewOpen(false);
         setReviewPayloadJson(null);
         setReviewValues(null);
-        toast.success(
-          res.capiSent
-            ? `Order ${res.orderId} saved.`
-            : `Order ${res.orderId} saved (Meta CAPI skipped — no CTWA session).`,
-        );
+        let summary = `Order ${res.orderId} saved.`;
+        if (res.capiSent) {
+          summary = `Order ${res.orderId} saved. Meta Purchase sent.`;
+        } else {
+          try {
+            const meta = JSON.parse(res.capiPayloadJson) as {
+              capiDeferred?: boolean;
+              capiSkipped?: boolean;
+            };
+            if (meta.capiDeferred) {
+              summary = `Order ${res.orderId} saved. Meta Purchase will be sent when status is Confirmed or Paid (or update status on the order page).`;
+            } else if (meta.capiSkipped) {
+              summary = `Order ${res.orderId} saved (Meta Purchase skipped — no CTWA session).`;
+            }
+          } catch {
+            summary = `Order ${res.orderId} saved.`;
+          }
+        }
+        toast.success(summary);
         router.push(`/orders/${res.orderId}/confirmation`);
         form.reset({
           phone: values.phone,
           ctwaSessionId: sessions[0]?.id ?? "",
           lines: [defaultLine(products)],
-          status: "paid",
+          status: "confirmed",
           capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
           deliveryCost: 0,
         } satisfies FormValues);
@@ -784,15 +798,15 @@ export function NewOrderForm({
                 {isDevReviewUi ? (
                   <>
                     Preview uses placeholder order id{" "}
-                    <code className="text-xs">PREVIEW</code> until you confirm.
-                    After you confirm, Meta CAPI is called and the order is saved
-                    only if Meta accepts the event.
+                    <code className="text-xs">PREVIEW</code>. Meta Purchase runs
+                    only when status is <strong>Confirmed</strong> or{" "}
+                    <strong>Paid</strong> and CTWA exists; otherwise it is deferred or
+                    skipped and you can fire it later from the order page.
                   </>
                 ) : (
                   <>
-                    Confirm contact, line items, and payment status. JSON below
-                    is the CAPI body (placeholder order id{" "}
-                    <code className="text-xs">PREVIEW</code> until you confirm).
+                    Confirm contact, line items, and status. Purchase JSON appears
+                    when Confirmed/Paid would send CAPI.
                   </>
                 )}
               </DialogDescription>

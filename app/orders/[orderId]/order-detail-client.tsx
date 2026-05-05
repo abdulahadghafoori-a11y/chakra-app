@@ -1,5 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { toast } from "sonner";
+
+import { updateOrderStatus } from "@/actions/order";
 import {
   Card,
   CardContent,
@@ -7,6 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -15,7 +28,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { getDefaultKabulDateTimeLocal } from "@/lib/kabul-time";
 import type { OrderDetail } from "@/lib/order-detail";
+import { orderStatusEligibleForPurchaseCapi } from "@/lib/order-meta-capi";
+import { orderStatuses, type UpdateOrderStatusInput } from "@/lib/validations/order";
 
 type Props = {
   order: OrderDetail;
@@ -31,8 +49,108 @@ function money(amount: string, currency: string) {
 }
 
 export function OrderDetailClient({ order }: Props) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [nextStatus, setNextStatus] = useState(order.status);
+  const [capiEventTimeKabul, setCapiEventTimeKabul] = useState(
+    getDefaultKabulDateTimeLocal(),
+  );
+
+  useEffect(() => {
+    setNextStatus(order.status);
+  }, [order.id, order.status]);
+
+  const needsCapiEventTime =
+    !order.capiSent && orderStatusEligibleForPurchaseCapi(nextStatus);
+
+  function onSaveStatus() {
+    startTransition(() => {
+      void (async () => {
+        const res = await updateOrderStatus({
+          orderId: order.id,
+          status: nextStatus as UpdateOrderStatusInput["status"],
+          capiEventTimeKabul: needsCapiEventTime ? capiEventTimeKabul : undefined,
+        });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(
+          res.capiSent && !order.capiSent
+            ? "Status updated. Meta Purchase sent."
+            : "Status updated.",
+        );
+        router.refresh();
+      })();
+    });
+  }
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Fulfillment status</CardTitle>
+          <CardDescription>
+            Move the order through your COD flow. Meta Purchase is sent once when
+            status becomes{" "}
+            <span className="text-foreground font-medium">Confirmed</span> or{" "}
+            <span className="text-foreground font-medium">Paid</span> (if CTWA
+            exists and CAPI was not sent yet).{" "}
+            <span className="text-foreground font-medium">Returned</span> does not
+            send CAPI.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="order-status-select" className="text-xs">
+              Status
+            </Label>
+            <Select
+              value={nextStatus}
+              onValueChange={(v) => {
+                if (v) setNextStatus(v);
+              }}
+            >
+              <SelectTrigger id="order-status-select" className="w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {orderStatuses.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {needsCapiEventTime ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="order-capi-time" className="text-xs">
+                Meta Purchase event time (Kabul)
+              </Label>
+              <Input
+                id="order-capi-time"
+                type="datetime-local"
+                className="w-[11rem]"
+                value={capiEventTimeKabul}
+                onChange={(e) => setCapiEventTimeKabul(e.target.value)}
+              />
+              <p className="text-muted-foreground max-w-md text-xs">
+                Used as Meta <code className="text-[11px]">event_time</code> for
+                this Purchase only.
+              </p>
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            disabled={pending || nextStatus === order.status}
+            onClick={onSaveStatus}
+          >
+            Save status
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Line items</CardTitle>

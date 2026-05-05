@@ -16,6 +16,12 @@
     "db:studio": "drizzle-kit studio",
     "db:repair": "node scripts/db-audit-and-repair.mjs",
     "staff:create-user": "node scripts/create-staff-user.mjs",
+    "meta:subscribe-page-webhooks": "node scripts/meta-subscribe-page-webhooks.mjs",
+    "meta:app-webhook-subscribe": "node scripts/meta-app-webhook-subscribe.mjs",
+    "meta:instagram-webhooks": "node scripts/meta-instagram-webhooks.mjs",
+    "meta:subscribe-webhooks": "node scripts/meta-subscribe-all-webhooks.mjs",
+    "meta:webhook-health": "node scripts/meta-webhook-url-health.mjs",
+    "meta:webhook-send-sample": "node scripts/meta-webhook-send-sample.mjs",
     "vercel:deploy": "vercel deploy --prod",
     "vercel:preview": "vercel deploy",
     "vercel:env:sync": "node scripts/sync-vercel-env.mjs"

@@ -2,7 +2,8 @@
  * Meta WhatsApp Cloud API webhooks (direct or via Chakra pass-through).
  * Configure in Meta for Developers → WhatsApp → Configuration: callback URL, **messages** field.
  *
- * GET: `hub.mode` / `hub.verify_token` / `hub.challenge` (`META_WHATSAPP_VERIFY_TOKEN`).
+ * GET: `hub.mode` / `hub.verify_token` / `hub.challenge` — same verify token as Page/IG webhooks
+ * (`META_WEBHOOK_VERIFY_TOKEN` or `META_WHATSAPP_VERIFY_TOKEN`; see `getMetaWebhookVerifyToken`).
  * POST: verify `X-Hub-Signature-256` when `META_APP_SECRET` is set, and/or
  * `X-Chakra-Signature-256` when `CHAKRA_WEBHOOK_SECRET` is set (raw body HMAC, hex only).
  * CTWA: upserts `contacts` + `ctwa_sessions` when `ctwa_clid` is present.
@@ -25,6 +26,7 @@ import { extractInboundTextMessages } from "@/lib/inbound-text-messages";
 import { extractMetaInboundMessageJobs } from "@/lib/meta-whatsapp-webhook";
 import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbound";
 import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
+import { getMetaWebhookVerifyToken } from "@/lib/meta-page-token";
 import { verifyWhatsAppWebhookPost } from "@/lib/webhook-signature";
 
 export const runtime = "nodejs";
@@ -34,11 +36,17 @@ export async function GET(request: Request) {
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
-  const verifyToken = process.env.META_WHATSAPP_VERIFY_TOKEN?.trim();
+
+  let verifyToken: string;
+  try {
+    verifyToken = getMetaWebhookVerifyToken();
+  } catch {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   if (
     mode === "subscribe" &&
     token &&
-    verifyToken &&
     token === verifyToken &&
     challenge
   ) {
@@ -52,7 +60,7 @@ export async function POST(request: Request) {
   const verified = verifyWhatsAppWebhookPost(rawBody, request.headers);
   if (!verified.ok) {
     return NextResponse.json(
-      { ok: false, error: verified.reason },
+      { ok: false, error: verified.reason, detail: verified.detail },
       { status: 401 },
     );
   }

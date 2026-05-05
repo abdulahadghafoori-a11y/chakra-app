@@ -24,9 +24,17 @@ import {
 import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 import { e164ToDigits } from "@/lib/phone";
 import {
+  buildMetaPurchaseParamsFromContext,
+  loadOrderPurchaseCapiContext,
+  orderStatusEligibleForPurchaseCapi,
+} from "@/lib/order-meta-capi";
+import { assertStaffSession } from "@/lib/staff-auth/guard";
+import {
   APP_CURRENCY,
   createOrderSchema,
   type CreateOrderInput,
+  updateOrderStatusSchema,
+  type UpdateOrderStatusInput,
 } from "@/lib/validations/order";
 
 export type CreateOrderSuccess = {
@@ -45,8 +53,17 @@ const PREVIEW_ORDER_ID = "PREVIEW";
 /** Shown in review UI and returned on create when there is no CTWA session / ctwa_clid (CAPI not sent). */
 const CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON = JSON.stringify(
   {
-    note: "Meta CAPI will not be sent: this contact has no CTWA session (no ctwa_clid from a Click-to-WhatsApp referral). The order can still be created.",
+    note: "Meta Purchase will not be sent: no CTWA session (no ctwa_clid). Confirm or mark Paid later on the order page to retry when attribution exists.",
     capiSkipped: true,
+  },
+  null,
+  2,
+);
+
+const CAPI_DEFERRED_PAYLOAD_JSON = JSON.stringify(
+  {
+    note: "Meta Purchase is sent only when status is Confirmed or Paid. Create this order as Pending (or change status on the order page); then set Confirmed or Paid to fire CAPI.",
+    capiDeferred: true,
   },
   null,
   2,
@@ -111,6 +128,10 @@ export async function previewOrderCapiPayload(
 
   const orderTotal = resolved.reduce((s, r) => s + r.lineValue, 0);
   const totalQuantity = resolved.reduce((s, r) => s + r.quantity, 0);
+
+  if (!orderStatusEligibleForPurchaseCapi(data.status)) {
+    return { ok: true, payloadJson: CAPI_DEFERRED_PAYLOAD_JSON };
+  }
 
   let orderEventAt: Date;
   try {
@@ -302,12 +323,16 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   const ctwaClid = latestSession?.ctwaClid?.trim() || null;
   const wabaId = latestSession?.wabaId ?? null;
-  const skipCapi = !ctwaClid;
+  const capiEligible = orderStatusEligibleForPurchaseCapi(data.status);
+  const capiAttempted = capiEligible && !!ctwaClid;
 
   let eventId = "";
-  let capiPayloadJson = CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON;
+  let capiPayloadJson = capiEligible
+    ? CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON
+    : CAPI_DEFERRED_PAYLOAD_JSON;
+  let capiSent = false;
 
-  if (!skipCapi) {
+  if (capiAttempted) {
     const metaParams = {
       orderId: orderPk,
       orderCreatedAt: orderEventAt,
@@ -331,11 +356,14 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       const capiResult = await sendMetaPurchaseEvent(metaParams);
       eventId = capiResult.eventId;
       capiPayloadJson = capiResult.payloadJson;
+      capiSent = true;
     } catch (e) {
       console.error("[createOrder] Meta CAPI failed", e);
       const message = e instanceof Error ? e.message : "Meta CAPI request failed";
       return { ok: false, error: message };
     }
+  } else if (capiEligible && !ctwaClid) {
+    capiPayloadJson = CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON;
   }
 
   const [inserted] = await db
@@ -347,8 +375,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       value: orderTotal.toFixed(4),
       currency: APP_CURRENCY,
       status: data.status,
-      capiSent: !skipCapi,
-      capiEventId: skipCapi ? null : eventId,
+      capiSent,
+      capiEventId: capiSent ? eventId : null,
       deliveryCost: data.deliveryCost.toFixed(4),
       returnCost: "0",
       codFee: "0",
@@ -360,9 +388,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   if (!inserted) {
     return {
       ok: false,
-      error: skipCapi
-        ? "Could not create order."
-        : "Meta event was sent but the order could not be saved. Check Meta Events Manager and try again or reconcile manually.",
+      error: capiAttempted
+        ? "Meta event was sent but the order could not be saved. Check Meta Events Manager and try again or reconcile manually."
+        : "Could not create order.",
     };
   }
 
@@ -389,9 +417,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     await db.delete(orders).where(eq(orders.id, inserted.id));
     return {
       ok: false,
-      error: skipCapi
-        ? "Could not save order lines."
-        : "Meta event was sent but line items failed to save. The order was removed; check Meta for a duplicate if you retry.",
+      error: capiAttempted
+        ? "Meta event was sent but line items failed to save. The order was removed; check Meta for a duplicate if you retry."
+        : "Could not save order lines.",
     };
   }
 
@@ -404,9 +432,120 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   return {
     ok: true,
     orderId: orderPk,
-    capiSent: !skipCapi,
-    capiEventId: skipCapi ? "" : eventId,
+    capiSent,
+    capiEventId: capiSent ? eventId : "",
     capiPayloadJson,
     capiError: null,
+  };
+}
+
+export type UpdateOrderStatusResult =
+  | {
+      ok: true;
+      capiSent: boolean;
+      capiEventId: string | null;
+      capiPayloadJson: string | null;
+    }
+  | { ok: false; error: string };
+
+export async function updateOrderStatus(
+  input: UpdateOrderStatusInput,
+): Promise<UpdateOrderStatusResult> {
+  await assertStaffSession();
+
+  const parsed = updateOrderStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { orderId, status: newStatus, capiEventTimeKabul } = parsed.data;
+
+  const [order] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!order) {
+    return { ok: false, error: "Order not found." };
+  }
+
+  if (order.status === newStatus) {
+    return {
+      ok: true,
+      capiSent: order.capiSent,
+      capiEventId: order.capiEventId,
+      capiPayloadJson: null,
+    };
+  }
+
+  let orderEventAt: Date;
+  try {
+    orderEventAt = capiEventTimeKabul?.trim()
+      ? kabulDateTimeLocalToDate(capiEventTimeKabul)
+      : new Date();
+  } catch {
+    return { ok: false, error: "Invalid event time (Kabul)." };
+  }
+  if (!isWithinMetaEventTimeWindow(orderEventAt)) {
+    return {
+      ok: false,
+      error:
+        "Event time cannot be more than 7 days in the past (Meta CAPI limit).",
+    };
+  }
+
+  const wantPurchaseCapi =
+    orderStatusEligibleForPurchaseCapi(newStatus) && !order.capiSent;
+
+  let capiSent = order.capiSent;
+  let capiEventId = order.capiEventId;
+  let capiPayloadJson: string | null = null;
+
+  if (wantPurchaseCapi) {
+    const ctx = await loadOrderPurchaseCapiContext(orderId);
+    if (!ctx) {
+      return { ok: false, error: "Could not load order for Meta CAPI." };
+    }
+
+    const params = buildMetaPurchaseParamsFromContext(ctx, orderEventAt);
+    if (params) {
+      try {
+        const result = await sendMetaPurchaseEvent(params);
+        capiSent = true;
+        capiEventId = result.eventId;
+        capiPayloadJson = result.payloadJson;
+      } catch (e) {
+        console.error("[updateOrderStatus] Meta CAPI failed", e);
+        const message =
+          e instanceof Error ? e.message : "Meta CAPI request failed";
+        return { ok: false, error: message };
+      }
+    }
+  }
+
+  await db
+    .update(orders)
+    .set({
+      status: newStatus,
+      capiSent,
+      capiEventId,
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, orderId));
+
+  revalidatePath("/campaigns");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/confirmation`);
+
+  return {
+    ok: true,
+    capiSent,
+    capiEventId,
+    capiPayloadJson,
   };
 }

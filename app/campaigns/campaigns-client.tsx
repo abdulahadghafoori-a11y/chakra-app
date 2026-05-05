@@ -59,8 +59,9 @@ type Totals = {
   metaMessagingConversationsStarted: number;
   ordersCount: number;
   paidOrdersCount: number;
+  convertedOrdersCount: number;
   metaPurchases: number;
-  paidRevenue: number;
+  convertedRevenue: number;
   grossProfitPaid: number;
   contributionProfit: number;
 };
@@ -97,16 +98,32 @@ function pct(n: number | null) {
 
 type VerdictFilter = CampaignVerdict | "ALL";
 
+function metaEffectiveStatusBadgeClass(status: string | null): string {
+  const s = status?.toUpperCase() ?? "";
+  if (s === "ACTIVE") {
+    return "border-emerald-600/40 bg-emerald-600/10 text-emerald-900 dark:text-emerald-100";
+  }
+  if (
+    s === "PAUSED" ||
+    s === "ARCHIVED" ||
+    s === "DELETED" ||
+    s === "CAMPAIGN_PAUSED"
+  ) {
+    return "border-muted-foreground/50 bg-muted/40 text-muted-foreground";
+  }
+  return "border-border text-muted-foreground";
+}
+
 function suggestedAction(v: CampaignVerdict): string {
   switch (v) {
     case "SCALE":
-      return "Raise budget gradually while watching CPA per paid order and profit ROAS.";
+      return "Raise budget gradually while watching CPA per converted order (paid + confirmed) and profit ROAS.";
     case "KEEP":
-      return "Maintain spend; gather more paid orders or lengthen the window before scaling.";
+      return "Maintain spend; gather more converted orders or lengthen the window before scaling.";
     case "OPTIMIZE":
       return "Keep the campaign live but fix creative, offer, WhatsApp flow, or COD confirmation.";
     case "KILL":
-      return "Pause or reduce spend; this window shows unprofitable or zero-collection COD.";
+      return "Pause or reduce spend; this window shows unprofitable spend or zero converted orders.";
     case "LEARNING":
       return "Let it run—too little CTWA or spend to judge; avoid big budget moves.";
     case "ATTRIBUTION_ISSUE":
@@ -358,28 +375,29 @@ export function CampaignsClient({
           <CardHeader className="px-4 pb-1 pt-0">
             <CardDescription>Orders / purchases</CardDescription>
             <CardTitle className="text-lg tabular-nums">
-              {totals.paidOrdersCount}{" "}
+              {totals.convertedOrdersCount}{" "}
               <span className="text-muted-foreground text-sm font-normal">
-                paid (app)
+                paid + confirmed
               </span>
             </CardTitle>
             <p className="text-muted-foreground text-xs font-normal leading-snug">
-              Attrib. orders: {totals.ordersCount} · Meta purchases (insights):{" "}
+              Paid only: {totals.paidOrdersCount} · Attrib. orders:{" "}
+              {totals.ordersCount} · Meta purchases (insights):{" "}
               {totals.metaPurchases}
             </p>
           </CardHeader>
         </Card>
         <Card className="py-3">
           <CardHeader className="px-4 pb-1 pt-0">
-            <CardDescription>Paid revenue</CardDescription>
+            <CardDescription>Converted revenue</CardDescription>
             <CardTitle className="text-lg tabular-nums">
-              {money(totals.paidRevenue)}
+              {money(totals.convertedRevenue)}
             </CardTitle>
           </CardHeader>
         </Card>
         <Card className="py-3">
           <CardHeader className="px-4 pb-1 pt-0">
-            <CardDescription>Gross profit (paid)</CardDescription>
+            <CardDescription>Gross profit (paid + confirmed)</CardDescription>
             <CardTitle className="text-lg tabular-nums">
               {money(totals.grossProfitPaid)}
             </CardTitle>
@@ -426,8 +444,10 @@ export function CampaignsClient({
           <div className="space-y-1.5">
             <CardTitle>Campaign decisions (COD)</CardTitle>
             <CardDescription>
-              ACTIVE campaigns only when Meta status is known.{" "}
-              <strong>App</strong> figures drive P&amp;L; <strong>Meta</strong>{" "}
+              Campaigns with spend, CTWA, orders, or Meta insights in this UTC
+              window — <strong>ACTIVE</strong> and <strong>inactive</strong>{" "}
+              (Meta <code className="bg-muted rounded px-1">effective_status</code>
+              ). <strong>App</strong> figures drive P&amp;L; <strong>Meta</strong>{" "}
               columns come from Ads Insights <code className="bg-muted rounded px-1">actions</code>{" "}
               after sync. Range (UTC): {rangeLabel}.
             </CardDescription>
@@ -460,11 +480,8 @@ export function CampaignsClient({
         <CardContent className="overflow-x-auto">
           {performance.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              Nothing to show for this range: either there is no activity, or
-              spend/orders belong only to paused or archived campaigns (those are
-              hidden when Meta reports a non-ACTIVE{" "}
-              <code className="bg-muted rounded px-1">effective_status</code>
-              ). Sync from Meta if data looks stale.
+              Nothing to show for this range: no spend, CTWA sessions, attributed
+              orders, or synced Ads Insights rows tied to a campaign id.
             </p>
           ) : filteredPerformance.length === 0 ? (
             <p className="text-muted-foreground text-sm">
@@ -487,16 +504,26 @@ export function CampaignsClient({
                     </span>
                   </TableHead>
                   <TableHead className="text-right">
-                    <span className="block leading-tight">Paid / Meta</span>
+                    <span className="block leading-tight">Converted / Meta</span>
                     <span className="text-muted-foreground block text-[10px] font-normal normal-case">
-                      app · insights
+                      paid + conf · insights
                     </span>
                   </TableHead>
                   <TableHead className="text-right">Pending</TableHead>
-                  <TableHead className="text-right">Collected</TableHead>
-                  <TableHead className="text-right">Gross profit</TableHead>
+                  <TableHead className="text-right">Converted revenue</TableHead>
+                  <TableHead className="text-right">
+                    <span className="block leading-tight">Gross profit</span>
+                    <span className="text-muted-foreground block text-[10px] font-normal normal-case">
+                      paid + conf
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Contribution</TableHead>
-                  <TableHead className="text-right">CPA</TableHead>
+                  <TableHead className="text-right">
+                    <span className="block leading-tight">CPA</span>
+                    <span className="text-muted-foreground block text-[10px] font-normal normal-case">
+                      per converted
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Profit ROAS</TableHead>
                   <TableHead className="text-right">CAPI</TableHead>
                 </TableRow>
@@ -544,15 +571,28 @@ export function CampaignsClient({
                                 </p>
                               ) : null}
                             </div>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "mt-0.5 shrink-0 px-1.5 py-0 text-[10px] font-semibold uppercase",
-                                verdictBadgeClass(r.verdict),
-                              )}
-                            >
-                              {r.verdict}
-                            </Badge>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "px-1.5 py-0 text-[10px] font-semibold uppercase",
+                                  metaEffectiveStatusBadgeClass(
+                                    r.campaignEffectiveStatus,
+                                  ),
+                                )}
+                              >
+                                {r.campaignEffectiveStatus?.trim() || "—"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "px-1.5 py-0 text-[10px] font-semibold uppercase",
+                                  verdictBadgeClass(r.verdict),
+                                )}
+                              >
+                                {r.verdict}
+                              </Badge>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
@@ -576,8 +616,12 @@ export function CampaignsClient({
                         </TableCell>
                         <TableCell className="text-right align-top">
                           <div className="flex flex-col items-end gap-0.5 text-xs tabular-nums">
-                            <span title="App paid orders (cash collected)">
-                              {r.paidOrdersCount} paid
+                            <span title="Converted orders (paid + confirmed)">
+                              {r.convertedOrdersCount} conv.
+                            </span>
+                            <span className="text-muted-foreground font-normal">
+                              ({r.paidOrdersCount} paid ·{" "}
+                              {r.confirmedOrdersCount} conf.)
                             </span>
                             <span
                               className="text-muted-foreground"
@@ -591,7 +635,7 @@ export function CampaignsClient({
                           {r.pendingOrdersCount}
                         </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
-                          {money(r.paidRevenue)}
+                          {money(r.convertedRevenue)}
                         </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
                           {money(r.grossProfitPaid)}
@@ -654,7 +698,7 @@ export function CampaignsClient({
                                   {pct(r.verdictDetail.orderConvFromMetaMessaging)}
                                 </span>
                                 <span>
-                                  Meta purch. / paid:{" "}
+                                  Meta purch. / conv.:{" "}
                                   {r.verdictDetail.metaPurchasesPerPaidOrder ==
                                   null
                                     ? "—"
@@ -699,7 +743,7 @@ export function CampaignsClient({
                                 </span>
                                 {r.paidOperationalCosts > 0 ? (
                                   <span>
-                                    Ops costs (paid):{" "}
+                                    Ops costs (paid + conf.):{" "}
                                     {money(r.paidOperationalCosts)}
                                   </span>
                                 ) : null}
@@ -712,7 +756,7 @@ export function CampaignsClient({
                                 </span>
                                 <span>Returned: {r.returnedOrdersCount}</span>
                                 <span>
-                                  Paid conv.:{" "}
+                                  Conv. / CTWA:{" "}
                                   {pct(r.verdictDetail.paidConvFromCtwa)}
                                 </span>
                                 <span>

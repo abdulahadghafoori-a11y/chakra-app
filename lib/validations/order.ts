@@ -27,7 +27,7 @@ const orderLineSchema = z.object({
 /**
  * CAPI `event_time` / order time: wall clock in Kabul (from `datetime-local`, interpreted as Asia/Kabul).
  */
-const capiEventTimeKabulField = z
+export const capiEventTimeKabulField = z
   .string()
   .min(1, "Set the event time (Kabul)")
   .refine(
@@ -60,3 +60,12 @@ export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 /** Client form: internal order id is always generated server-side. */
 export const newOrderFormSchema = createOrderSchema.omit({ orderId: true });
 export type NewOrderFormInput = z.infer<typeof newOrderFormSchema>;
+
+export const updateOrderStatusSchema = z.object({
+  orderId: z.string().min(1),
+  status: z.enum(orderStatuses),
+  /** Used as Meta event_time when sending deferred Purchase CAPI on Confirm/Paid. */
+  capiEventTimeKabul: capiEventTimeKabulField.optional(),
+});
+
+export type UpdateOrderStatusInput = z.infer<typeof updateOrderStatusSchema>;

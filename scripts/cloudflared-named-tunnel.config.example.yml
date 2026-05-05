@@ -1,0 +1,25 @@
+# Named tunnel — copy to %USERPROFILE%\.cloudflared\config.yml and edit UUID/paths.
+#
+# IMPORTANT: Do NOT use https://<tunnel-uuid>.cfargotunnel.com as your Meta callback URL.
+# That hostname is only the CNAME *target* Cloudflare gives your tunnel; it often does not
+# resolve usefully on client DNS (e.g. Windows). Create a hostname on YOUR domain instead:
+#
+# Namecheap-only DNS (grey / DNS-only CNAME to *.cfargotunnel.com) often resolves to a
+# non-routable IPv6 (fd10::…) — Invoke-WebRequest and Meta fail. Fix: use Cloudflare DNS for
+# afghanonline.store with nameservers pointed at Cloudflare, then add CNAME hooks → your tunnel
+# target with Proxy ON (orange cloud), or run: cloudflared tunnel route dns <tunnel> hooks.afghanonline.store
+# Meta / env:
+#   META_PAGE_WEBHOOK_CALLBACK_URL=https://hooks.afghanonline.store/api/webhooks/meta
+#
+# If afghanonline.store uses Cloudflare nameservers, instead run:
+#   cloudflared tunnel route dns chakra-dev hooks.afghanonline.store
+#
+# Run: cloudflared tunnel run chakra-dev
+
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: C:/Users/YOUR_WINDOWS_USER/.cloudflared/YOUR_TUNNEL_UUID.json
+
+ingress:
+  - hostname: hooks.afghanonline.store
+    service: http://127.0.0.1:3000
+  - service: http_status:404

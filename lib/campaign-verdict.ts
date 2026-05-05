@@ -41,9 +41,13 @@ export type CampaignVerdictInput = {
   pendingOrdersCount: number;
   totalRevenue: number;
   paidRevenue: number;
+  /** Paid + confirmed orders — COD funnel decisions treat confirmed like converted revenue. */
+  convertedOrdersCount: number;
+  convertedRevenue: number;
   totalLineCogs: number;
   paidLineCogs: number;
-  /** Delivery + RTO + COD fees on paid orders only (attributed window). */
+  convertedLineCogs: number;
+  /** Delivery + RTO + COD fees on paid + confirmed orders (attributed window). */
   paidOperationalCosts: number;
   capiSentCount: number;
   /** Meta Ads Insights — messaging conversations started (bidding/delivery context). */
@@ -71,7 +75,7 @@ export type CampaignVerdictResult = {
   capiRate: number | null;
   /** orders / Meta messaging starts — Meta-side funnel (app CTWA remains primary truth). */
   orderConvFromMetaMessaging: number | null;
-  /** Meta purchase count / app paid orders when paid > 0. */
+  /** Meta purchase count / app converted orders (paid + confirmed) when converted > 0. */
   metaPurchasesPerPaidOrder: number | null;
 };
 
@@ -86,7 +90,7 @@ function metaCrossChannelNotes(
   const skipMessagingCompare =
     m.spend >= t.optimizeSpendFloor &&
     ctwa === 0 &&
-    m.paidOrdersCount === 0 &&
+    m.convertedOrdersCount === 0 &&
     metaMsg >= 5;
 
   if (!skipMessagingCompare && metaMsg >= 3 && ctwa >= 3) {
@@ -104,10 +108,10 @@ function metaCrossChannelNotes(
   }
 
   const mp = m.metaPurchases;
-  const paid = m.paidOrdersCount;
+  const converted = m.convertedOrdersCount;
   if (
     mp >= 1 &&
-    paid === 0 &&
+    converted === 0 &&
     m.ordersCount === 0 &&
     m.spend >= t.minSpendToJudge
   ) {
@@ -116,16 +120,16 @@ function metaCrossChannelNotes(
       message:
         "Meta insights show purchase actions but the app has no attributed orders in this window—reconcile events; P&L and scale/kill stay on app orders.",
     });
-  } else if (mp >= 2 && paid >= 2) {
-    if (mp > paid * 2) {
+  } else if (mp >= 2 && converted >= 2) {
+    if (mp > converted * 2) {
       notes.push({
         code: "meta_vs_app_purchase_mismatch",
-        message: `Meta attributes ${mp} purchases vs ${paid} app paid orders—optimize with both; cash truth is app paid.`,
+        message: `Meta attributes ${mp} purchases vs ${converted} app converted orders (paid + confirmed)—optimize with both; truth is app orders.`,
       });
-    } else if (paid > mp * 2) {
+    } else if (converted > mp * 2) {
       notes.push({
         code: "meta_vs_app_purchase_mismatch",
-        message: `App paid (${paid}) is well above Meta purchase count (${mp})—check CAPI / dedup; decisions remain on app paid.`,
+        message: `App converted (${converted}) is well above Meta purchase count (${mp})—check CAPI / dedup; decisions remain on app orders.`,
       });
     }
   }
@@ -166,24 +170,24 @@ function maybeScaleConfidenceNotes(
   reasons: VerdictReason[],
 ): void {
   if (
-    m.paidOrdersCount > 0 &&
-    m.paidOrdersCount < t.minPaidOrdersToScale
+    m.convertedOrdersCount > 0 &&
+    m.convertedOrdersCount < t.minPaidOrdersToScale
   ) {
     reasons.push({
       code: "paid_orders_below_min",
-      message: `Only ${m.paidOrdersCount} paid order(s)—need at least ${t.minPaidOrdersToScale} for scale confidence.`,
+      message: `Only ${m.convertedOrdersCount} converted order(s) (paid + confirmed)—need at least ${t.minPaidOrdersToScale} for scale confidence.`,
     });
   }
   if (
     m.pendingOrdersCount >= 4 &&
-    m.paidOrdersCount > 0 &&
-    m.pendingOrdersCount >= m.paidOrdersCount * 2 &&
-    m.paidOrdersCount < t.minPaidOrdersToScale
+    m.convertedOrdersCount > 0 &&
+    m.pendingOrdersCount >= m.convertedOrdersCount * 2 &&
+    m.convertedOrdersCount < t.minPaidOrdersToScale
   ) {
     reasons.push({
       code: "pending_orders_high",
       message:
-        "Pending pipeline is large vs paid—confirm fulfillment and collection before scaling.",
+        "Pending pipeline is large vs converted orders—confirm fulfillment and collection before scaling.",
     });
   }
 }
@@ -196,21 +200,21 @@ export function evaluateCampaign(
   const reasons: VerdictReason[] = [];
 
   const grossProfitPaid =
-    m.paidRevenue - m.paidLineCogs - m.paidOperationalCosts;
+    m.convertedRevenue - m.convertedLineCogs - m.paidOperationalCosts;
   const contributionProfit = grossProfitPaid - m.spend;
   const contributionRoas = m.spend > 0 ? contributionProfit / m.spend : null;
   const profitRoas =
     m.spend > 0 && grossProfitPaid > 0 ? grossProfitPaid / m.spend : null;
   const cpaPaid =
-    m.paidOrdersCount > 0 ? m.spend / m.paidOrdersCount : null;
+    m.convertedOrdersCount > 0 ? m.spend / m.convertedOrdersCount : null;
   const orderConvFromCtwa =
     m.ctwaSessions > 0 ? m.ordersCount / m.ctwaSessions : null;
   const paidConvFromCtwa =
-    m.ctwaSessions > 0 ? m.paidOrdersCount / m.ctwaSessions : null;
+    m.ctwaSessions > 0 ? m.convertedOrdersCount / m.ctwaSessions : null;
 
   const pendingRevenueShare =
     m.totalRevenue > 0
-      ? (m.totalRevenue - m.paidRevenue) / m.totalRevenue
+      ? (m.totalRevenue - m.convertedRevenue) / m.totalRevenue
       : null;
 
   const capiRate =
@@ -221,8 +225,8 @@ export function evaluateCampaign(
       ? m.ordersCount / m.metaMessagingConversationsStarted
       : null;
   const metaPurchasesPerPaidOrder =
-    m.paidOrdersCount > 0
-      ? m.metaPurchases / m.paidOrdersCount
+    m.convertedOrdersCount > 0
+      ? m.metaPurchases / m.convertedOrdersCount
       : null;
 
   const baseMetrics: Omit<
@@ -245,7 +249,7 @@ export function evaluateCampaign(
   if (
     m.spend >= t.optimizeSpendFloor &&
     m.ctwaSessions === 0 &&
-    m.paidOrdersCount === 0
+    m.convertedOrdersCount === 0
   ) {
     if (m.metaMessagingConversationsStarted >= 5) {
       reasons.push({
@@ -286,11 +290,11 @@ export function evaluateCampaign(
 
   if (
     m.spend >= t.killSpendWithZeroPaidOrders &&
-    m.paidOrdersCount === 0
+    m.convertedOrdersCount === 0
   ) {
     reasons.push({
       code: "bleed_no_paid_orders",
-      message: `Spend ${m.spend.toFixed(2)}+ with no paid (COD collected) orders in this window.`,
+      message: `Spend ${m.spend.toFixed(2)}+ with no paid or confirmed orders in this window.`,
     });
     return {
       verdict: "KILL",
@@ -304,7 +308,7 @@ export function evaluateCampaign(
     reasons.push({
       code: "insufficient_data",
       message:
-        "Not enough spend, app CTWA sessions, Meta messaging starts, or paid orders yet to recommend scale or kill.",
+        "Not enough spend, app CTWA sessions, Meta messaging starts, or converted orders yet to recommend scale or kill.",
     });
     return {
       verdict: "LEARNING",
@@ -315,14 +319,14 @@ export function evaluateCampaign(
   }
 
   if (
-    m.paidOrdersCount >= t.minPaidOrdersToScale &&
+    m.convertedOrdersCount >= t.minPaidOrdersToScale &&
     contributionProfit < 0 &&
     m.spend >= t.minSpendToJudge
   ) {
     reasons.push({
       code: "negative_contribution_with_data",
       message:
-        "Paid gross profit minus ad spend is negative with enough paid orders to judge.",
+        "Converted gross profit (paid + confirmed) minus ad spend is negative with enough orders to judge.",
     });
     return {
       verdict: "KILL",
@@ -334,13 +338,13 @@ export function evaluateCampaign(
 
   if (
     cpaPaid != null &&
-    m.paidOrdersCount >= t.minPaidOrdersToScale &&
+    m.convertedOrdersCount >= t.minPaidOrdersToScale &&
     cpaPaid > t.maxCpaPaidOrder &&
     t.maxCpaPaidOrder < 900_000
   ) {
     reasons.push({
       code: "cpa_above_max",
-      message: `CPA per paid order (${cpaPaid.toFixed(2)}) exceeds CAMPAIGN_MAX_CPA_PAID_ORDER.`,
+      message: `CPA per converted order (${cpaPaid.toFixed(2)}) exceeds CAMPAIGN_MAX_CPA_PAID_ORDER.`,
     });
     return {
       verdict: "KILL",
@@ -353,12 +357,12 @@ export function evaluateCampaign(
   if (
     pendingRevenueShare != null &&
     pendingRevenueShare > t.maxPendingRevenueShare &&
-    m.paidOrdersCount < t.minPaidOrdersToScale
+    m.convertedOrdersCount < t.minPaidOrdersToScale
   ) {
     reasons.push({
       code: "pending_revenue_too_high",
       message:
-        "Most attributed revenue is still non-paid—do not scale until more orders convert to paid.",
+        "Most attributed revenue is outside paid + confirmed—do not scale until more orders convert.",
     });
     return {
       verdict: "KEEP",
@@ -373,7 +377,7 @@ export function evaluateCampaign(
     m.ctwaSessions >= t.minCtwaSessionsToJudge &&
     orderConvFromCtwa != null &&
     orderConvFromCtwa < t.minOrderConvFromCtwa &&
-    m.paidOrdersCount < t.minPaidOrdersToScale
+    m.convertedOrdersCount < t.minPaidOrdersToScale
   ) {
     reasons.push({
       code: "low_ctwa_conversion",
@@ -392,12 +396,12 @@ export function evaluateCampaign(
     m.ordersCount >= 3 &&
     paidConvFromCtwa != null &&
     paidConvFromCtwa < t.minPaidConvFromCtwa &&
-    m.paidOrdersCount < t.minPaidOrdersToScale
+    m.convertedOrdersCount < t.minPaidOrdersToScale
   ) {
     reasons.push({
       code: "low_paid_conversion",
       message:
-        "Orders exist but paid rate is weak—COD confirmation or fulfillment may be the bottleneck.",
+        "Orders exist but paid + confirmed rate from CTWA is weak—COD confirmation or fulfillment may be the bottleneck.",
     });
     return {
       verdict: "OPTIMIZE",
@@ -408,7 +412,7 @@ export function evaluateCampaign(
   }
 
   if (
-    m.paidOrdersCount >= t.minPaidOrdersToScale &&
+    m.convertedOrdersCount >= t.minPaidOrdersToScale &&
     profitRoas != null &&
     profitRoas >= t.targetProfitRoas &&
     contributionProfit > 0 &&
@@ -418,7 +422,7 @@ export function evaluateCampaign(
     reasons.push({
       code: "scale_candidate",
       message:
-        "Paid profit ROAS meets target and contribution after spend is positive.",
+        "Profit ROAS on converted revenue (paid + confirmed) meets target and contribution after spend is positive.",
     });
     reasons.push({
       code: "profit_roas_above_target",
@@ -432,7 +436,7 @@ export function evaluateCampaign(
     };
   }
 
-  if (m.paidOrdersCount > 0 && contributionProfit >= 0) {
+  if (m.convertedOrdersCount > 0 && contributionProfit >= 0) {
     reasons.push({
       code: "neutral_hold",
       message:
@@ -449,7 +453,7 @@ export function evaluateCampaign(
 
   reasons.push({
     code: "neutral_hold",
-    message: "Mixed signals—extend the window or gather more paid orders.",
+    message: "Mixed signals—extend the window or gather more converted orders.",
   });
   maybeScaleConfidenceNotes(m, t, reasons);
   return {
@@ -461,11 +465,11 @@ export function evaluateCampaign(
 }
 
 function lowDataGate(m: CampaignVerdictInput, t: CampaignThresholds): boolean {
-  if (m.paidOrdersCount >= t.minPaidOrdersToScale) return false;
+  if (m.convertedOrdersCount >= t.minPaidOrdersToScale) return false;
   if (m.spend >= t.killSpendWithZeroPaidOrders) return false;
   const lowSpend = m.spend < t.minSpendToJudge;
   const lowCtwa = m.ctwaSessions < t.minCtwaSessionsToJudge;
   const lowMetaMsg =
     m.metaMessagingConversationsStarted < t.minCtwaSessionsToJudge;
-  return lowSpend && lowCtwa && lowMetaMsg && m.paidOrdersCount === 0;
+  return lowSpend && lowCtwa && lowMetaMsg && m.convertedOrdersCount === 0;
 }

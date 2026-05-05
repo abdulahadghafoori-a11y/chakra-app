@@ -478,6 +478,91 @@ export const businessExpenses = pgTable(
   (t) => [index("business_expenses_incurred_date_idx").on(t.incurredDate)],
 );
 
+/** FB Page + IG comments ingested from Meta webhooks; staff moderate via Graph API. */
+export const metaEngagementComments = pgTable(
+  "meta_engagement_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    externalCommentId: text("external_comment_id").notNull(),
+    parentExternalCommentId: text("parent_external_comment_id"),
+    parentPostId: text("parent_post_id").notNull(),
+    containerId: text("container_id").notNull(),
+    authorExternalId: text("author_external_id"),
+    authorName: text("author_name"),
+    messageText: text("message_text"),
+    permalinkUrl: text("permalink_url"),
+    status: text("status").notNull().default("active"),
+    rawPayload: jsonb("raw_payload"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("meta_engagement_comments_platform_external_unique").on(
+      t.platform,
+      t.externalCommentId,
+    ),
+    index("meta_engagement_comments_created_idx").on(desc(t.createdAt)),
+    index("meta_engagement_comments_status_idx").on(t.status),
+  ],
+);
+
+export const metaEngagementCommentActions = pgTable(
+  "meta_engagement_comment_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    commentId: uuid("comment_id")
+      .notNull()
+      .references(() => metaEngagementComments.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    detail: jsonb("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("meta_engagement_comment_actions_comment_id_idx").on(t.commentId)],
+);
+
+/** Dedupe Messenger / IG DM — one AI redirect reply per (channel, scope, participant). */
+export const metaDmBridgeThreads = pgTable(
+  "meta_dm_bridge_threads",
+  {
+    channel: text("channel").notNull(),
+    scopeId: text("scope_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    replySentAt: timestamp("reply_sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channel, t.scopeId, t.participantId] }),
+  ],
+);
+
+export const metaDmBridgeLogs = pgTable(
+  "meta_dm_bridge_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channel: text("channel").notNull(),
+    scopeId: text("scope_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    direction: text("direction").notNull(),
+    body: text("body"),
+    model: text("model"),
+    raw: jsonb("raw"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("meta_dm_bridge_logs_created_idx").on(desc(t.createdAt))],
+);
+
 export type Conversation = typeof conversations.$inferSelect;
 export type ConversationMessage = typeof conversationMessages.$inferSelect;
 export type ConversationProfile = typeof conversationProfiles.$inferSelect;
