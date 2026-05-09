@@ -12,7 +12,7 @@
  * - META_APP_SECRET (WhatsApp POST signature), webhook verify token(s)
  * - SALES_AGENT_ENABLED unset/false for minimal WhatsApp agent surface
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,18 +22,28 @@ const vercelCli = resolve(root, "node_modules/vercel/dist/vc.js");
 
 config({ path: resolve(root, ".env.local"), override: true });
 
+/** Keep in sync with `.env.example`; only non-empty keys are pushed. */
 const KEYS = [
   "DATABASE_URL",
   "FEATURE_SET",
   "CTWA_LINK_META_AD",
   "META_ACCESS_TOKEN",
   "META_DATASET_ID",
+  "META_PIXEL_ID",
   "META_WHATSAPP_BUSINESS_ACCOUNT_ID",
   "META_TEST_EVENT_CODE",
   "META_WHATSAPP_VERIFY_TOKEN",
   "META_PAGE_WEBHOOK_VERIFY_TOKEN",
   "META_WEBHOOK_VERIFY_TOKEN",
   "META_APP_SECRET",
+  "META_INSTAGRAM_APP_SECRET",
+  "META_APP_ID",
+  "META_PAGE_WEBHOOK_CALLBACK_URL",
+  "META_FACEBOOK_PAGE_ID",
+  "META_INSTAGRAM_BUSINESS_ACCOUNT_ID",
+  "META_GRAPH_VERSION",
+  "META_AD_ACCOUNT_ID",
+  "META_WEBHOOK_DEBUG",
   "CHAKRA_WEBHOOK_SECRET",
   "WHATSAPP_ACCESS_TOKEN",
   "WHATSAPP_PHONE_NUMBER_ID",
@@ -57,8 +67,13 @@ const KEYS = [
 /** Preview env in Vercel CLI requires a git branch (or use Dashboard → Preview → “All branches”). */
 const TARGETS = ["production"];
 
+/**
+ * stdin/stdout inherited from `vercel`: on Windows PowerShell + `npm run`, stderr such as
+ * "Retrieving project…" becomes a terminating error after the **first** variable. Pipe and
+ * only print buffered output here so the Node loop completes.
+ */
 function runVercelEnvAdd(name, target, value) {
-  execFileSync(
+  const result = spawnSync(
     process.execPath,
     [
       vercelCli,
@@ -75,10 +90,24 @@ function runVercelEnvAdd(name, target, value) {
     ],
     {
       cwd: root,
-      stdio: "inherit",
-      env: { ...process.env, CI: "1" },
+      encoding: "utf8",
+      env: { ...process.env, CI: "1", FORCE_COLOR: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const errText = `${result.stderr || ""}${result.stdout || ""}`.trim();
+    if (errText) console.error(errText);
+    throw new Error(
+      `vercel env add failed for ${name} (${target}): exit ${result.status}`,
+    );
+  }
+  const out = (result.stdout || "").trim();
+  if (out) console.log(out);
 }
 
 for (const name of KEYS) {
