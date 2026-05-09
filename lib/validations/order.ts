@@ -13,6 +13,11 @@ export const orderStatuses = [
 
 export const APP_CURRENCY = "USD" as const;
 
+/** Purchase CAPI only when order reaches one of these statuses (create or staff update). */
+export function orderStatusEligibleForPurchaseCapi(status: string): boolean {
+  return status === "confirmed" || status === "paid";
+}
+
 const ctwaSessionIdField = z.union([
   z.string().uuid(),
   z.literal(""),

@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getDashboardSummary } from "@/lib/dashboard-summary";
+import { isCoreFeatureSet } from "@/lib/feature-set";
 import {
   groupLinesByOrderId,
   loadOrderLineSummaries,
@@ -75,6 +76,7 @@ export default async function HomePage({
 
   const { contactId } = await searchParams;
   const filterContactId = contactId?.trim() || undefined;
+  const coreMode = isCoreFeatureSet();
 
   const [summary, orderRows] = await Promise.all([
     getDashboardSummary(),
@@ -168,22 +170,24 @@ export default async function HomePage({
             Full list and new order
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Overhead</CardDescription>
-            <CardTitle className="text-base font-medium">
-              <Link
-                className="text-primary underline-offset-4 hover:underline"
-                href="/expenses"
-              >
-                Business expenses
-              </Link>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Rent, utilities, and other non-order costs
-          </CardContent>
-        </Card>
+        {coreMode ? null : (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Overhead</CardDescription>
+              <CardTitle className="text-base font-medium">
+                <Link
+                  className="text-primary underline-offset-4 hover:underline"
+                  href="/expenses"
+                >
+                  Business expenses
+                </Link>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              Rent, utilities, and other non-order costs
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="space-y-2">

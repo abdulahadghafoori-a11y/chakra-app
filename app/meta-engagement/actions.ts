@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import {
   deleteFacebookComment,
   deleteInstagramComment,
@@ -51,6 +52,10 @@ export async function replyMetaCommentAction(
     return { ok: false, error: "Unauthorized" };
   }
 
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
+  }
+
   const trimmed = message.trim();
   if (!trimmed) {
     return { ok: false, error: "Reply text is required." };
@@ -91,6 +96,10 @@ export async function hideMetaCommentAction(
     return { ok: false, error: "Unauthorized" };
   }
 
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
+  }
+
   const row = await getEngagementCommentById(commentId);
   if (!row) return { ok: false, error: "Comment not found." };
   if (row.status === "deleted") {
@@ -125,6 +134,10 @@ export async function unhideMetaCommentAction(
     ({ email: staffEmail } = await requireStaffSession());
   } catch {
     return { ok: false, error: "Unauthorized" };
+  }
+
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
   }
 
   const row = await getEngagementCommentById(commentId);
@@ -162,6 +175,10 @@ export async function deleteMetaCommentAction(
     return { ok: false, error: "Unauthorized" };
   }
 
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
+  }
+
   const row = await getEngagementCommentById(commentId);
   if (!row) return { ok: false, error: "Comment not found." };
   if (!isPlatform(row.platform)) {
@@ -192,6 +209,10 @@ export async function suggestMetaCommentReplyAction(
     await requireStaffSession();
   } catch {
     return { ok: false, error: "Unauthorized" };
+  }
+
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
   }
 
   const row = await getEngagementCommentById(commentId);

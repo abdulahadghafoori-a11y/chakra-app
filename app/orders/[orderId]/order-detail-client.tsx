@@ -32,8 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getDefaultKabulDateTimeLocal } from "@/lib/kabul-time";
 import type { OrderDetail } from "@/lib/order-detail";
-import { orderStatusEligibleForPurchaseCapi } from "@/lib/order-meta-capi";
-import { orderStatuses, type UpdateOrderStatusInput } from "@/lib/validations/order";
+import { orderStatuses, orderStatusEligibleForPurchaseCapi, type UpdateOrderStatusInput } from "@/lib/validations/order";
 
 type Props = {
   order: OrderDetail;

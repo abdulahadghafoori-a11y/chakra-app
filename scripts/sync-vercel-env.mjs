@@ -2,6 +2,15 @@
  * Pushes non-empty variables from .env.local to Vercel (production + preview).
  * Usage: node scripts/sync-vercel-env.mjs
  * Requires: linked project (`npx vercel link`), `npx vercel login`
+ *
+ * Production MVP (core) env hints (set in Dashboard or sync from .env.local):
+ * - DATABASE_URL, AUTH_SECRET (32+ chars)
+ * - FEATURE_SET=core — gates staff UI + blocks /api/webhooks/meta (Page/IG)
+ * - CTWA_LINK_META_AD=false — optional; skip Marketing API when linking CTWA → meta_ads
+ * - META_DATASET_ID (or META_PIXEL_ID), META_ACCESS_TOKEN
+ * - Omit META_TEST_EVENT_CODE in production so CAPI sends real Purchase events
+ * - META_APP_SECRET (WhatsApp POST signature), webhook verify token(s)
+ * - SALES_AGENT_ENABLED unset/false for minimal WhatsApp agent surface
  */
 import { execFileSync } from "node:child_process";
 import { config } from "dotenv";
@@ -15,6 +24,8 @@ config({ path: resolve(root, ".env.local"), override: true });
 
 const KEYS = [
   "DATABASE_URL",
+  "FEATURE_SET",
+  "CTWA_LINK_META_AD",
   "META_ACCESS_TOKEN",
   "META_DATASET_ID",
   "META_WHATSAPP_BUSINESS_ACCOUNT_ID",

@@ -26,13 +26,13 @@ import { e164ToDigits } from "@/lib/phone";
 import {
   buildMetaPurchaseParamsFromContext,
   loadOrderPurchaseCapiContext,
-  orderStatusEligibleForPurchaseCapi,
 } from "@/lib/order-meta-capi";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 import {
   APP_CURRENCY,
   createOrderSchema,
   type CreateOrderInput,
+  orderStatusEligibleForPurchaseCapi,
   updateOrderStatusSchema,
   type UpdateOrderStatusInput,
 } from "@/lib/validations/order";

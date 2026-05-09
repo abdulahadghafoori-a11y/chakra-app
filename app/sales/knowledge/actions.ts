@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { businessKnowledge } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 
 function slugify(raw: string): string {
@@ -18,6 +19,7 @@ function slugify(raw: string): string {
 
 export async function upsertBusinessKnowledgeArticle(formData: FormData) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
 
   const slugRaw = String(formData.get("slug") ?? "");
   const slug = slugify(slugRaw);
@@ -58,6 +60,7 @@ export async function upsertBusinessKnowledgeArticle(formData: FormData) {
 
 export async function deleteBusinessKnowledgeArticle(formData: FormData) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const slug = slugify(String(formData.get("slug") ?? ""));
   if (!slug) throw new Error("Invalid slug");
 

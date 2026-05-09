@@ -7,6 +7,7 @@
  * POST: verify `X-Hub-Signature-256` when `META_APP_SECRET` is set, and/or
  * `X-Chakra-Signature-256` when `CHAKRA_WEBHOOK_SECRET` is set (raw body HMAC, hex only).
  * CTWA: upserts `contacts` + `ctwa_sessions` when `ctwa_clid` is present.
+ * Optional: set `CTWA_LINK_META_AD=false` to skip Graph hierarchy sync for `meta_ads` (`lib/feature-set.ts`).
  * Sales agent: when `SALES_AGENT_ENABLED=true`, runs OpenAI + DB; WhatsApp send only if
  * `SALES_AGENT_SEND_WHATSAPP=true` (see `lib/sales-agent/process-inbound.ts`).
  */
@@ -26,6 +27,7 @@ import { extractInboundTextMessages } from "@/lib/inbound-text-messages";
 import { extractMetaInboundMessageJobs } from "@/lib/meta-whatsapp-webhook";
 import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbound";
 import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
+import { shouldLinkCtwaSessionToMetaAd } from "@/lib/feature-set";
 import { getMetaWebhookVerifyToken } from "@/lib/meta-page-token";
 import { verifyWhatsAppWebhookPost } from "@/lib/webhook-signature";
 
@@ -139,7 +141,7 @@ export async function POST(request: Request) {
             ),
           )
           .limit(1);
-        if (sessionRow?.id) {
+        if (sessionRow?.id && shouldLinkCtwaSessionToMetaAd()) {
           try {
             await linkCtwaSessionToMetaAd(sessionRow.id, job.sourceId);
           } catch (e) {

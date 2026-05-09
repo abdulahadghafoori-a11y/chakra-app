@@ -18,11 +18,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listProducts } from "@/actions/products";
+import { isCoreFeatureSet } from "@/lib/feature-set";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
   const productRows = await listProducts();
+  const coreMode = isCoreFeatureSet();
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 sm:space-y-8">
@@ -30,7 +32,13 @@ export default async function ProductsPage() {
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Products</h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
           Catalog used when creating orders and CAPI item payloads. All amounts are USD.
-          Use <strong>Agent</strong> to edit long product copy the WhatsApp sales agent may cite.
+          {!coreMode ? (
+            <>
+              {" "}
+              Use <strong>Agent</strong> to edit long product copy the WhatsApp sales agent may
+              cite.
+            </>
+          ) : null}
         </p>
       </div>
 
@@ -54,13 +62,16 @@ export default async function ProductsPage() {
               <TableHead className="text-right">Default sale</TableHead>
               <TableHead className="text-right">COGS</TableHead>
               <TableHead>Created</TableHead>
-              <TableHead className="w-[1%]"> </TableHead>
+              {coreMode ? null : <TableHead className="w-[1%]"> </TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {productRows.length === 0 ? (
               <TableRow>
-                <TableCell className="text-muted-foreground" colSpan={6}>
+                <TableCell
+                  className="text-muted-foreground"
+                  colSpan={coreMode ? 5 : 6}
+                >
                   No products yet.
                 </TableCell>
               </TableRow>
@@ -76,14 +87,19 @@ export default async function ProductsPage() {
                   <TableCell className="text-muted-foreground text-xs">
                     {p.createdAt}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Link
-                      className={buttonVariants({ variant: "outline", size: "sm" })}
-                      href={`/products/${p.id}/agent`}
-                    >
-                      Agent
-                    </Link>
-                  </TableCell>
+                  {coreMode ? null : (
+                    <TableCell className="text-right">
+                      <Link
+                        className={buttonVariants({
+                          variant: "outline",
+                          size: "sm",
+                        })}
+                        href={`/products/${p.id}/agent`}
+                      >
+                        Agent
+                      </Link>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

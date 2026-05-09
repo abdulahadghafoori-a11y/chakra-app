@@ -1,10 +1,12 @@
 import Link from "next/link";
 
 import { SiteHeaderNav } from "@/components/site-header-nav";
+import { isCoreFeatureSet } from "@/lib/feature-set";
 import { getStaffSessionOptional } from "@/lib/staff-auth/guard";
 
 export async function SiteHeader() {
   const session = await getStaffSessionOptional();
+  const coreMode = isCoreFeatureSet();
 
   return (
     <header className="sticky top-0 z-50 border-b bg-card/95 pt-[env(safe-area-inset-top)] backdrop-blur supports-backdrop-filter:bg-card/80">
@@ -16,9 +18,9 @@ export async function SiteHeader() {
           Chakra App
         </Link>
         {!session ? (
-          <SiteHeaderNav authenticated={false} />
+          <SiteHeaderNav authenticated={false} coreMode={false} />
         ) : (
-          <SiteHeaderNav authenticated />
+          <SiteHeaderNav authenticated coreMode={coreMode} />
         )}
       </div>
     </header>

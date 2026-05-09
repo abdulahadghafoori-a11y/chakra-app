@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { conversations } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 
 function revalidateSales(conversationId: string) {
@@ -14,6 +15,7 @@ function revalidateSales(conversationId: string) {
 
 export async function salesMarkHandoff(formData: FormData) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const conversationId = String(formData.get("conversationId") ?? "");
   const reason = String(formData.get("reason") ?? "manual_handoff");
   if (!conversationId) throw new Error("Missing conversation id");
@@ -33,6 +35,7 @@ export async function salesMarkHandoff(formData: FormData) {
 
 export async function salesMarkClosed(formData: FormData) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const conversationId = String(formData.get("conversationId") ?? "");
   if (!conversationId) throw new Error("Missing conversation id");
 
@@ -46,6 +49,7 @@ export async function salesMarkClosed(formData: FormData) {
 
 export async function salesResumeBot(formData: FormData) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const conversationId = String(formData.get("conversationId") ?? "");
   if (!conversationId) throw new Error("Missing conversation id");
 

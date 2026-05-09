@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
-const authedNavLinks: { href: string; label: string }[] = [
+const baseAuthedNavLinks: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
   { href: "/contacts", label: "Contacts" },
   { href: "/orders", label: "Orders" },
@@ -18,6 +18,13 @@ const authedNavLinks: { href: string; label: string }[] = [
   { href: "/meta-engagement", label: "Meta comments" },
   { href: "/sales", label: "AI agent" },
 ];
+
+const CORE_HIDDEN_HREFS = new Set([
+  "/expenses",
+  "/campaigns",
+  "/meta-engagement",
+  "/sales",
+]);
 
 function navLinkClass(pathname: string, href: string) {
   const active =
@@ -30,8 +37,18 @@ function navLinkClass(pathname: string, href: string) {
   );
 }
 
-export function SiteHeaderNav({ authenticated }: { authenticated: boolean }) {
+export function SiteHeaderNav({
+  authenticated,
+  coreMode,
+}: {
+  authenticated: boolean;
+  coreMode: boolean;
+}) {
   const pathname = usePathname() ?? "";
+
+  const authedNavLinks = coreMode
+    ? baseAuthedNavLinks.filter((l) => !CORE_HIDDEN_HREFS.has(l.href))
+    : baseAuthedNavLinks;
 
   if (!authenticated) {
     return (

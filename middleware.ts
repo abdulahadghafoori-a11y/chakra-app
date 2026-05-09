@@ -2,6 +2,10 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import {
+  isMetaSocialWebhookDisabledInCoreMode,
+  isPathRestrictedInCoreMode,
+} from "@/lib/feature-set";
+import {
   isAuthSecretConfigured,
   STAFF_SESSION_COOKIE,
   verifyStaffSessionJwt,
@@ -20,6 +24,17 @@ function isPublicPath(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (
+    pathname === "/api/webhooks/meta" &&
+    isMetaSocialWebhookDisabledInCoreMode()
+  ) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+
+  if (isPathRestrictedInCoreMode(pathname)) {
+    return new NextResponse(null, { status: 404 });
+  }
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();

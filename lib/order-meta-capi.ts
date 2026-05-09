@@ -25,11 +25,6 @@ export type OrderPurchaseCapiContext = {
   totalQuantity: number;
 };
 
-/** Purchase CAPI only when order reaches one of these statuses (create or staff update). */
-export function orderStatusEligibleForPurchaseCapi(status: string): boolean {
-  return status === "confirmed" || status === "paid";
-}
-
 /**
  * Load contact, CTWA session (order-linked or latest for contact), and lines for Purchase CAPI.
  */

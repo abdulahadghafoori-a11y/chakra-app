@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { products } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 
 export type ProductRow = {
@@ -154,6 +155,7 @@ export async function createProduct(
 
 export async function getProductAgentFields(productId: string) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) return null;
   const id = productId.trim();
   if (!z.string().uuid().safeParse(id).success) return null;
   const [row] = await db.select().from(products).where(eq(products.id, id)).limit(1);
@@ -173,6 +175,9 @@ export async function updateProductAgentFields(
   input: z.infer<typeof updateAgentSchema>,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await assertStaffSession();
+  if (isCoreFeatureSet()) {
+    return { ok: false, error: FULL_FEATURE_UNAVAILABLE };
+  }
   const parsed = updateAgentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

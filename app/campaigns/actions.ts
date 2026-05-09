@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 import {
   assertValidCampaignInsightRange,
@@ -27,6 +28,7 @@ export async function syncCampaignsFromMetaAction(
   untilDay: string,
 ) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   assertValidCampaignInsightRange(sinceDay, untilDay);
   const structure = await bulkSyncAdAccountStructure();
   const insights = await syncAdInsightsDailyRange(sinceDay, untilDay);
@@ -36,6 +38,7 @@ export async function syncCampaignsFromMetaAction(
 
 export async function syncMetaStructureAction() {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const stats = await bulkSyncAdAccountStructure();
   revalidatePath("/campaigns");
   return stats;
@@ -43,6 +46,7 @@ export async function syncMetaStructureAction() {
 
 export async function syncMetaInsightsAction(days: number) {
   await assertStaffSession();
+  if (isCoreFeatureSet()) throw new Error(FULL_FEATURE_UNAVAILABLE);
   const d = clampCampaignInsightsDays(Math.floor(days || 7));
   const until = new Date();
   const untilDay = until.toISOString().slice(0, 10);
