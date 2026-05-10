@@ -60,13 +60,13 @@ export function verifyWhatsAppWebhookPost(
   const metaSigNorm = metaSig?.trim() ?? "";
   const chakraSigTrim = chakraSig?.trim() ?? "";
 
-  const chakraOk =
-    Boolean(chakraSecret) &&
-    verifyChakraWebhookSignature(
-      rawBody,
-      chakraSigTrim || null,
-      chakraSecret,
-    );
+  const chakraOk = chakraSecret
+    ? verifyChakraWebhookSignature(
+        rawBody,
+        chakraSigTrim || null,
+        chakraSecret,
+      )
+    : false;
 
   const metaLooksLikeMeta =
     Boolean(metaSigNorm) &&
