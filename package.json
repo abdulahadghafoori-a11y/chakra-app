@@ -22,6 +22,7 @@
     "meta:subscribe-webhooks": "node scripts/meta-subscribe-all-webhooks.mjs",
     "meta:webhook-health": "node scripts/meta-webhook-url-health.mjs",
     "meta:webhook-send-sample": "node scripts/meta-webhook-send-sample.mjs",
+    "meta:waba-dataset": "node scripts/meta-waba-dataset.mjs",
     "vercel:deploy": "vercel deploy --prod",
     "vercel:preview": "vercel deploy",
     "vercel:env:sync": "node scripts/sync-vercel-env.mjs"
