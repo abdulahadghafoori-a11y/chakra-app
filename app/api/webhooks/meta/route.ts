@@ -27,7 +27,10 @@ import {
   handleInstagramMessagingEvent,
   handleMessengerEvent,
 } from "@/lib/meta-social-webhook-process";
-import { verifyWhatsAppWebhookPost } from "@/lib/webhook-signature";
+import {
+  hubSignaturePresent,
+  verifyWhatsAppWebhookPost,
+} from "@/lib/webhook-signature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -201,13 +204,6 @@ function summarizeMetaWebhookInbound(rawBody: string): {
   } catch {
     return { object: null, entryCount: 0, hints: ["invalid_json"] };
   }
-}
-
-function hubSignaturePresent(headers: Headers): boolean {
-  return Boolean(
-    headers.get("X-Hub-Signature-256") ??
-      headers.get("x-hub-signature-256"),
-  );
 }
 
 export async function GET(request: Request) {

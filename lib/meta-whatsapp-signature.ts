@@ -11,11 +11,12 @@ export function verifyMetaWebhookSignature(
   appSecret: string,
 ): boolean {
   const secret = appSecret.trim();
-  if (!secret || !signatureHeader?.startsWith("sha256=")) return false;
+  const sig = signatureHeader?.trim();
+  if (!secret || !sig?.toLowerCase().startsWith("sha256=")) return false;
   const expected = createHmac("sha256", secret)
     .update(rawBody, "utf8")
     .digest("hex");
-  const received = signatureHeader.slice(7).trim().toLowerCase();
+  const received = sig.slice(7).trim().toLowerCase();
   try {
     const a = Buffer.from(received, "hex");
     const b = Buffer.from(expected, "hex");

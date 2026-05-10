@@ -4,12 +4,15 @@
  *
  * GET: `hub.mode` / `hub.verify_token` / `hub.challenge` — same verify token as Page/IG webhooks
  * (`META_WEBHOOK_VERIFY_TOKEN` or `META_WHATSAPP_VERIFY_TOKEN`; see `getMetaWebhookVerifyToken`).
- * POST: verify `X-Hub-Signature-256` when `META_APP_SECRET` is set, and/or
+ * POST: verify `X-Hub-Signature-256` when Meta app secrets are set, and/or
  * `X-Chakra-Signature-256` when `CHAKRA_WEBHOOK_SECRET` is set (raw body HMAC, hex only).
+ * If **both** are set, **either** valid signature accepts the request (Chakra pass-through often omits Meta’s header).
  * CTWA: upserts `contacts` + `ctwa_sessions` when `ctwa_clid` is present.
  * Optional: set `CTWA_LINK_META_AD=false` to skip Graph hierarchy sync for `meta_ads` (`lib/feature-set.ts`).
  * Sales agent: when `SALES_AGENT_ENABLED=true`, runs OpenAI + DB; WhatsApp send only if
  * `SALES_AGENT_SEND_WHATSAPP=true` (see `lib/sales-agent/process-inbound.ts`).
+ *
+ * Chakra Chat pass-through: configure `CHAKRA_WEBHOOK_SECRET` from Chakra; Meta’s `X-Hub-Signature-256` is often absent on relayed POSTs.
  */
 
 import { NextResponse } from "next/server";
@@ -29,7 +32,11 @@ import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbou
 import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
 import { shouldLinkCtwaSessionToMetaAd } from "@/lib/feature-set";
 import { getMetaWebhookVerifyToken } from "@/lib/meta-page-token";
-import { verifyWhatsAppWebhookPost } from "@/lib/webhook-signature";
+import {
+  chakraSignaturePresent,
+  hubSignaturePresent,
+  verifyWhatsAppWebhookPost,
+} from "@/lib/webhook-signature";
 
 export const runtime = "nodejs";
 
@@ -59,8 +66,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
+  const inboundHubSig = hubSignaturePresent(request.headers);
+  const inboundChakraSig = chakraSignaturePresent(request.headers);
+  console.info("[whatsapp webhook] inbound POST (received)", {
+    bytes: rawBody.length,
+    hasMetaSig: inboundHubSig,
+    hasChakraSig: inboundChakraSig,
+  });
+
   const verified = verifyWhatsAppWebhookPost(rawBody, request.headers);
   if (!verified.ok) {
+    console.warn(
+      "[whatsapp webhook] POST rejected (signature):",
+      verified.reason,
+      verified.detail ?? "",
+      {
+        bytes: rawBody.length,
+        hasMetaSig: inboundHubSig,
+        hasChakraSig: inboundChakraSig,
+      },
+    );
     return NextResponse.json(
       { ok: false, error: verified.reason, detail: verified.detail },
       { status: 401 },
