@@ -7,13 +7,17 @@ import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import { neon } from "@neondatabase/serverless";
 
+import { resolvedDatabaseUrlFromEnv } from "./resolve-database-url.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname, "../.env") });
 config({ path: path.resolve(__dirname, "../.env.local"), override: true });
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is not set.");
+let url;
+try {
+  url = resolvedDatabaseUrlFromEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 }
 

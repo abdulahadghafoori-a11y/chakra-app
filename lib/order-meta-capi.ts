@@ -130,10 +130,7 @@ export async function loadOrderPurchaseCapiContext(
 export function buildMetaPurchaseParamsFromContext(
   ctx: OrderPurchaseCapiContext,
   orderEventAt: Date,
-): MetaPurchaseParams | null {
-  const clid = ctx.ctwaClid?.trim();
-  if (!clid) return null;
-
+): MetaPurchaseParams {
   return {
     orderId: ctx.orderId,
     orderCreatedAt: orderEventAt,
@@ -143,7 +140,7 @@ export function buildMetaPurchaseParamsFromContext(
     currency: APP_CURRENCY,
     totalQuantity: ctx.totalQuantity,
     lines: ctx.lines,
-    ctwaClid: clid,
+    ctwaClid: ctx.ctwaClid?.trim() || null,
     whatsappBusinessAccountId: ctx.wabaId,
     phoneDigits: ctx.phoneDigits,
   };

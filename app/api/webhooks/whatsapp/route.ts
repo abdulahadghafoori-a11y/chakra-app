@@ -7,12 +7,14 @@
  * POST: verify `X-Hub-Signature-256` when Meta app secrets are set, and/or
  * `X-Chakra-Signature-256` when `CHAKRA_WEBHOOK_SECRET` is set (raw body HMAC, hex only).
  * If **both** are set, **either** valid signature accepts the request (Chakra pass-through often omits Meta’s header).
- * CTWA: upserts `contacts` + `ctwa_sessions` when `ctwa_clid` is present.
- * Optional: set `CTWA_LINK_META_AD=false` to skip Graph hierarchy sync for `meta_ads` (`lib/feature-set.ts`).
+ * Contacts: upsert from every inbound `messages[]` customer row (with `from`).
+ * CTWA: insert `ctwa_sessions` only when `ctwa_clid` is present; eligible sessions link to `meta_ads`
+ * via Marketing API hierarchy sync (`linkCtwaSessionToMetaAd` / `shouldLinkCtwaSessionToMetaAd`).
  * Sales agent: when `SALES_AGENT_ENABLED=true`, runs OpenAI + DB; WhatsApp send only if
  * `SALES_AGENT_SEND_WHATSAPP=true` (see `lib/sales-agent/process-inbound.ts`).
  *
  * Chakra Chat pass-through: configure `CHAKRA_WEBHOOK_SECRET` from Chakra; Meta’s `X-Hub-Signature-256` is often absent on relayed POSTs.
+ * Relayed JSON may use `payload` / stringified bodies or camelCase `ctwaClid`; the route normalizes via `coerceToMetaWhatsAppWebhookBody` before parsing.
  */
 
 import { NextResponse } from "next/server";
@@ -27,7 +29,11 @@ import {
 import { upsertContactByPhone } from "@/lib/contacts";
 import { db } from "@/lib/db";
 import { extractInboundTextMessages } from "@/lib/inbound-text-messages";
-import { extractMetaInboundMessageJobs } from "@/lib/meta-whatsapp-webhook";
+import {
+  coerceToMetaWhatsAppWebhookBody,
+  extractMetaInboundContactJobs,
+  extractMetaInboundMessageJobs,
+} from "@/lib/meta-whatsapp-webhook";
 import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbound";
 import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
 import { shouldLinkCtwaSessionToMetaAd } from "@/lib/feature-set";
@@ -93,11 +99,15 @@ export async function POST(request: Request) {
   }
 
   let body: unknown;
+  /** Verify uses raw bytes; JSON.parse rejects a leading UTF‑8 BOM (`\uFEFF`) that some relays add. */
+  const jsonText = rawBody.replace(/^\uFEFF/, "");
   try {
-    body = rawBody ? JSON.parse(rawBody) : null;
+    body = jsonText ? JSON.parse(jsonText) : null;
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
+
+  body = coerceToMetaWhatsAppWebhookBody(body);
 
   const root =
     body !== null && typeof body === "object" && !Array.isArray(body)
@@ -112,9 +122,51 @@ export async function POST(request: Request) {
     });
   }
 
+  const contactJobs = extractMetaInboundContactJobs(body);
+  let contactsUpserted = 0;
+  let contactsErrors = 0;
+
+  for (const cj of contactJobs) {
+    const phoneKey = contactPhoneKeyFromRaw(cj.phoneDigits);
+    if (!phoneKey) {
+      contactsErrors++;
+      continue;
+    }
+
+    const { countryCode, countryName } = countryFromPhoneDigits(phoneKey);
+
+    try {
+      await upsertContactByPhone({
+        phoneNumber: phoneKey,
+        name: cj.name,
+        countryCode,
+        countryName,
+        createTime: cj.sendTime,
+      });
+      contactsUpserted++;
+    } catch (e) {
+      console.error("[whatsapp webhook] contact persist failed", e);
+      contactsErrors++;
+    }
+  }
+
   const jobs = extractMetaInboundMessageJobs(body);
+
+  const traceCounts =
+    process.env.META_WEBHOOK_TRACE?.trim().toLowerCase() === "true"
+      ? {
+          contactJobCount: contactJobs.length,
+          ctwaJobCount: jobs.length,
+        }
+      : null;
+  if (traceCounts) {
+    console.info("[whatsapp webhook] trace", traceCounts);
+  }
+
   let ctwaProcessed = 0;
   let ctwaErrors = 0;
+  let ctwaInsertedNew = 0;
+  let ctwaDuplicateKey = 0;
 
   for (const job of jobs) {
     const phoneKey = contactPhoneKeyFromRaw(job.phoneDigits);
@@ -123,9 +175,9 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const { countryCode, countryName } = countryFromPhoneDigits(phoneKey);
-
     try {
+      const { countryCode, countryName } = countryFromPhoneDigits(phoneKey);
+
       const contact = await upsertContactByPhone({
         phoneNumber: phoneKey,
         name: job.name,
@@ -134,7 +186,7 @@ export async function POST(request: Request) {
         createTime: job.sendTime,
       });
 
-      await db
+      const inserted = await db
         .insert(ctwaSessions)
         .values({
           contactId: contact.id,
@@ -152,10 +204,14 @@ export async function POST(request: Request) {
             ctwaSessions.ctwaClid,
             ctwaSessions.sendTime,
           ],
-        });
+        })
+        .returning({ id: ctwaSessions.id });
 
-      if (job.sourceId) {
-        const [sessionRow] = await db
+      let sessionId = inserted[0]?.id ?? null;
+      if (sessionId) {
+        ctwaInsertedNew++;
+      } else {
+        const [existing] = await db
           .select({ id: ctwaSessions.id })
           .from(ctwaSessions)
           .where(
@@ -166,12 +222,22 @@ export async function POST(request: Request) {
             ),
           )
           .limit(1);
-        if (sessionRow?.id && shouldLinkCtwaSessionToMetaAd()) {
-          try {
-            await linkCtwaSessionToMetaAd(sessionRow.id, job.sourceId);
-          } catch (e) {
-            console.error("[whatsapp webhook] CTWA meta link failed", e);
-          }
+        sessionId = existing?.id ?? null;
+        if (sessionId) {
+          ctwaDuplicateKey++;
+        } else {
+          console.error(
+            "[whatsapp webhook] CTWA insert skipped but no row matched (contact/sendTime/clid)",
+            { contactId: contact.id, ctwaClidLen: job.ctwaClid.length },
+          );
+        }
+      }
+
+      if (sessionId && job.sourceId && shouldLinkCtwaSessionToMetaAd()) {
+        try {
+          await linkCtwaSessionToMetaAd(sessionId, job.sourceId);
+        } catch (e) {
+          console.error("[whatsapp webhook] CTWA meta link failed", e);
         }
       }
       ctwaProcessed++;
@@ -198,7 +264,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (jobs.length === 0 && textMsgs.length === 0) {
+  if (contactJobs.length === 0 && jobs.length === 0 && textMsgs.length === 0) {
     return NextResponse.json({
       ok: true,
       ignored: true,
@@ -208,7 +274,18 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    ctwa: { processed: ctwaProcessed, errors: ctwaErrors },
+    contacts: {
+      upserted: contactsUpserted,
+      errors: contactsErrors,
+    },
+    ctwa: {
+      processed: ctwaProcessed,
+      errors: ctwaErrors,
+      /** New rows vs same `(contact_id, ctwa_clid, send_time)` already in DB (replay / double delivery). */
+      inserted: ctwaInsertedNew,
+      duplicateKey: ctwaDuplicateKey,
+    },
     agent: { ok: agentOk, skipped: agentSkipped, errors: agentErrors },
+    ...(traceCounts ? { trace: traceCounts } : {}),
   });
 }

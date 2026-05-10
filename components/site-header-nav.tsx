@@ -19,12 +19,7 @@ const baseAuthedNavLinks: { href: string; label: string }[] = [
   { href: "/sales", label: "AI agent" },
 ];
 
-const CORE_HIDDEN_HREFS = new Set([
-  "/expenses",
-  "/campaigns",
-  "/meta-engagement",
-  "/sales",
-]);
+const CORE_HIDDEN_HREFS = new Set(["/expenses", "/meta-engagement", "/sales"]);
 
 function navLinkClass(pathname: string, href: string) {
   const active =

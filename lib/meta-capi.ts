@@ -1,10 +1,11 @@
 /**
- * Meta Conversions API (Graph) — server-side Purchase for Click to WhatsApp attribution.
+ * Meta Conversions API (Graph) — server-side Purchase for WhatsApp / business_messaging.
+ *
+ * When `ctwa_clid` is set, Meta can tie the event to CTWA attribution; without it we still send
+ * `Purchase`/`TestEvent` with hashed phone, external_id, and optional `whatsapp_business_account_id`
+ * (session or `META_WHATSAPP_BUSINESS_ACCOUNT_ID`) — weaker campaign matching, fewer “missing Meta purchase” gaps.
  *
  * Docs: https://developers.facebook.com/docs/marketing-api/conversions-api
- *
- * Inbound CTWA context comes from your own stack: configure the WhatsApp **messages** webhook
- * directly on the Meta app (see `app/api/webhooks/whatsapp`) — same JSON shape as Meta’s docs.
  */
 
 import {

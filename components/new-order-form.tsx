@@ -293,12 +293,13 @@ export function NewOrderForm({
           try {
             const meta = JSON.parse(res.capiPayloadJson) as {
               capiDeferred?: boolean;
+              /** Legacy: older builds skipped CAPI without ctwa_clid */
               capiSkipped?: boolean;
             };
             if (meta.capiDeferred) {
               summary = `Order ${res.orderId} saved. Meta Purchase will be sent when status is Confirmed or Paid (or update status on the order page).`;
             } else if (meta.capiSkipped) {
-              summary = `Order ${res.orderId} saved (Meta Purchase skipped — no CTWA session).`;
+              summary = `Order ${res.orderId} saved (legacy: Meta Purchase was skipped — no CTWA session).`;
             }
           } catch {
             summary = `Order ${res.orderId} saved.`;
@@ -343,10 +344,11 @@ export function NewOrderForm({
         <CardTitle className="text-lg sm:text-xl">New order</CardTitle>
         <CardDescription className="text-pretty leading-relaxed">
           The phone must match a contact already in the system (from WhatsApp).
-          The latest CTWA session is used when present (for{" "}
-          <code className="text-xs">ctwa_clid</code>); otherwise the order is
-          saved and Meta CAPI is skipped. You will review the payload before the
-          order is created.
+          When creating as Confirmed/Paid we send Meta Purchase using the latest
+          session when available (better{" "}
+          <code className="text-xs">ctwa_clid</code>&nbsp;matching); without it we
+          still send using phone + WhatsApp identifiers. You review the payload
+          before the order is created.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-4 pb-6 sm:px-6">

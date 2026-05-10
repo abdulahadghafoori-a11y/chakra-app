@@ -50,16 +50,6 @@ export type CreateOrderResult = CreateOrderSuccess | { ok: false; error: string 
 
 const PREVIEW_ORDER_ID = "PREVIEW";
 
-/** Shown in review UI and returned on create when there is no CTWA session / ctwa_clid (CAPI not sent). */
-const CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON = JSON.stringify(
-  {
-    note: "Meta Purchase will not be sent: no CTWA session (no ctwa_clid). Confirm or mark Paid later on the order page to retry when attribution exists.",
-    capiSkipped: true,
-  },
-  null,
-  2,
-);
-
 const CAPI_DEFERRED_PAYLOAD_JSON = JSON.stringify(
   {
     note: "Meta Purchase is sent only when status is Confirmed or Paid. Create this order as Pending (or change status on the order page); then set Confirmed or Paid to fire CAPI.",
@@ -157,10 +147,6 @@ export async function previewOrderCapiPayload(
   const ctwaClid = latestSession?.ctwaClid?.trim() || null;
   const wabaId = latestSession?.wabaId ?? null;
 
-  if (!ctwaClid) {
-    return { ok: true, payloadJson: CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON };
-  }
-
   if (process.env.NODE_ENV !== "production") {
     if (!process.env.META_TEST_EVENT_CODE?.trim()) {
       return {
@@ -185,7 +171,7 @@ export async function previewOrderCapiPayload(
       quantity: r.quantity,
       lineValue: r.lineValue,
     })),
-    ctwaClid: ctwaClid || null,
+    ctwaClid,
     whatsappBusinessAccountId: wabaId,
     phoneDigits: e164ToDigits(contact.phoneNumber),
   });
@@ -324,15 +310,12 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   const ctwaClid = latestSession?.ctwaClid?.trim() || null;
   const wabaId = latestSession?.wabaId ?? null;
   const capiEligible = orderStatusEligibleForPurchaseCapi(data.status);
-  const capiAttempted = capiEligible && !!ctwaClid;
 
   let eventId = "";
-  let capiPayloadJson = capiEligible
-    ? CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON
-    : CAPI_DEFERRED_PAYLOAD_JSON;
+  let capiPayloadJson = CAPI_DEFERRED_PAYLOAD_JSON;
   let capiSent = false;
 
-  if (capiAttempted) {
+  if (capiEligible) {
     const metaParams = {
       orderId: orderPk,
       orderCreatedAt: orderEventAt,
@@ -362,8 +345,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       const message = e instanceof Error ? e.message : "Meta CAPI request failed";
       return { ok: false, error: message };
     }
-  } else if (capiEligible && !ctwaClid) {
-    capiPayloadJson = CAPI_SKIPPED_NO_CTWA_PAYLOAD_JSON;
   }
 
   const [inserted] = await db
@@ -388,7 +369,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   if (!inserted) {
     return {
       ok: false,
-      error: capiAttempted
+      error: capiSent
         ? "Meta event was sent but the order could not be saved. Check Meta Events Manager and try again or reconcile manually."
         : "Could not create order.",
     };
@@ -417,7 +398,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     await db.delete(orders).where(eq(orders.id, inserted.id));
     return {
       ok: false,
-      error: capiAttempted
+      error: capiSent
         ? "Meta event was sent but line items failed to save. The order was removed; check Meta for a duplicate if you retry."
         : "Could not save order lines.",
     };
@@ -512,18 +493,16 @@ export async function updateOrderStatus(
     }
 
     const params = buildMetaPurchaseParamsFromContext(ctx, orderEventAt);
-    if (params) {
-      try {
-        const result = await sendMetaPurchaseEvent(params);
-        capiSent = true;
-        capiEventId = result.eventId;
-        capiPayloadJson = result.payloadJson;
-      } catch (e) {
-        console.error("[updateOrderStatus] Meta CAPI failed", e);
-        const message =
-          e instanceof Error ? e.message : "Meta CAPI request failed";
-        return { ok: false, error: message };
-      }
+    try {
+      const result = await sendMetaPurchaseEvent(params);
+      capiSent = true;
+      capiEventId = result.eventId;
+      capiPayloadJson = result.payloadJson;
+    } catch (e) {
+      console.error("[updateOrderStatus] Meta CAPI failed", e);
+      const message =
+        e instanceof Error ? e.message : "Meta CAPI request failed";
+      return { ok: false, error: message };
     }
   }
 

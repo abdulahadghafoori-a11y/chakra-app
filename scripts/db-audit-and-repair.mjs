@@ -14,9 +14,11 @@ import { createRequire } from "node:module";
 import { config } from "dotenv";
 import { neon } from "@neondatabase/serverless";
 
+import { resolvedDatabaseUrlFromEnv } from "./resolve-database-url.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-config({ path: path.resolve(__dirname, "../.env.local") });
 config({ path: path.resolve(__dirname, "../.env") });
+config({ path: path.resolve(__dirname, "../.env.local"), override: true });
 
 const require = createRequire(import.meta.url);
 const parsePhoneNumberFromString = require("libphonenumber-js/max");
@@ -65,9 +67,11 @@ function parseToE164ForDb(raw, hintCountry) {
   return null;
 }
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is not set (.env.local).");
+let url;
+try {
+  url = resolvedDatabaseUrlFromEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 }
 

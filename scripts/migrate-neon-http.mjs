@@ -12,6 +12,8 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";
 
+import { resolvedDatabaseUrlFromEnv } from "./resolve-database-url.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const migrationsFolder = path.join(root, "drizzle", "migrations");
@@ -19,9 +21,11 @@ const migrationsFolder = path.join(root, "drizzle", "migrations");
 config({ path: path.join(root, ".env") });
 config({ path: path.join(root, ".env.local"), override: true });
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is not set (.env.local).");
+let url;
+try {
+  url = resolvedDatabaseUrlFromEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 }
 

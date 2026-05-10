@@ -1,13 +1,15 @@
 /**
  * Create a staff user for /sales and /campaigns sign-in.
  * Usage: npm run staff:create-user -- you@company.com your-secret-password
- * Requires: DATABASE_URL, migration 0020_staff_users applied.
+ * Requires dev/prod Neon URL (.env.local) and migration 0020_staff_users applied.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import { config } from "dotenv";
 import { neon } from "@neondatabase/serverless";
+
+import { resolvedDatabaseUrlFromEnv } from "./resolve-database-url.mjs";
 
 const ROUNDS = 11;
 
@@ -16,9 +18,11 @@ const root = path.resolve(__dirname, "..");
 config({ path: path.join(root, ".env") });
 config({ path: path.join(root, ".env.local"), override: true });
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is not set (.env.local).");
+let url;
+try {
+  url = resolvedDatabaseUrlFromEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 }
 

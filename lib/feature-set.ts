@@ -1,6 +1,7 @@
 /**
- * `FEATURE_SET=core`: production MVP — contacts, CTWA, orders/CAPI, catalog only.
- * Unset or any other value (e.g. `full`): all staff surfaces enabled.
+ * `FEATURE_SET=core`: production MVP — contacts, CTWA, orders/CAPI, campaigns, catalog (no
+ * expenses, Meta comments surface, or AI sales). Unset or another value (`full`): enable all staff
+ * surfaces.
  */
 
 export function isCoreFeatureSet(): boolean {
@@ -19,7 +20,6 @@ export function isPathRestrictedInCoreMode(pathname: string): boolean {
   if (!isCoreFeatureSet()) return false;
 
   if (pathname.startsWith("/expenses")) return true;
-  if (pathname.startsWith("/campaigns")) return true;
   if (pathname.startsWith("/meta-engagement")) return true;
 
   if (pathname.startsWith("/sales/login")) return false;
@@ -36,11 +36,9 @@ export function isMetaSocialWebhookDisabledInCoreMode(): boolean {
 }
 
 /**
- * WhatsApp webhook: skip Marketing API enrichment of CTWA → meta_ads hierarchy.
- * Set `CTWA_LINK_META_AD=false` in minimal prod if you omit ads.read permissions.
+ * WhatsApp webhook: CTWA sessions with referral `source_id` always upsert/link `meta_ads`
+ * hierarchy via Marketing API (requires token access to Ads).
  */
 export function shouldLinkCtwaSessionToMetaAd(): boolean {
-  const raw = process.env.CTWA_LINK_META_AD?.trim().toLowerCase();
-  if (raw === "0" || raw === "false" || raw === "no") return false;
   return true;
 }

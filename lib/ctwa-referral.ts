@@ -37,13 +37,33 @@ function findDeepStringProp(root: unknown, prop: string): string | null {
   return walk(root);
 }
 
-/** Resolves `ctwa_clid` from message-level or nested `text.referral` (Meta Cloud API). */
-export function findCtwaClid(obj: unknown): string | null {
-  const fromReferral = asRecord(asRecord(obj)?.referral)?.ctwa_clid;
-  if (typeof fromReferral === "string" && fromReferral.length > 0) {
-    return fromReferral;
+function firstTrimmedNonEmpty(...vals: unknown[]): string | null {
+  for (const v of vals) {
+    if (typeof v === "string") {
+      const t = v.trim();
+      if (t.length > 0) return t;
+    }
   }
-  return findDeepStringProp(obj, "ctwa_clid");
+  return null;
+}
+
+/**
+ * Meta Cloud API snake_case (`ctwa_clid`) and relays that camelCase (`ctwaClid`).
+ * Checks top-level referral, nested `text.referral`, then deep search for either key name.
+ */
+export function findCtwaClid(obj: unknown): string | null {
+  const msg = asRecord(obj);
+  for (const ref of [
+    asRecord(msg?.referral),
+    asRecord(asRecord(msg?.text)?.referral),
+  ]) {
+    if (!ref) continue;
+    const clid = firstTrimmedNonEmpty(ref.ctwa_clid, ref.ctwaClid);
+    if (clid) return clid;
+  }
+  return (
+    findDeepStringProp(obj, "ctwa_clid") ?? findDeepStringProp(obj, "ctwaClid")
+  );
 }
 
 export function referralSourceFields(message: unknown): {
@@ -51,13 +71,16 @@ export function referralSourceFields(message: unknown): {
   sourceUrl: string | null;
   sourceType: string | null;
 } {
-  const ref = asRecord(asRecord(message)?.referral);
+  let ref = asRecord(asRecord(message)?.referral);
+  if (!ref) {
+    ref = asRecord(asRecord(asRecord(message)?.text)?.referral);
+  }
   if (!ref) {
     return { sourceId: null, sourceUrl: null, sourceType: null };
   }
   return {
-    sourceId: typeof ref.source_id === "string" ? ref.source_id : null,
-    sourceUrl: typeof ref.source_url === "string" ? ref.source_url : null,
-    sourceType: typeof ref.source_type === "string" ? ref.source_type : null,
+    sourceId: firstTrimmedNonEmpty(ref.source_id, ref.sourceId),
+    sourceUrl: firstTrimmedNonEmpty(ref.source_url, ref.sourceUrl),
+    sourceType: firstTrimmedNonEmpty(ref.source_type, ref.sourceType),
   };
 }
