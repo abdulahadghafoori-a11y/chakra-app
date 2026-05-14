@@ -8,6 +8,8 @@
  * Docs: https://developers.facebook.com/docs/marketing-api/conversions-api
  */
 
+import { randomBytes } from "crypto";
+
 import {
   hashCountryForMeta,
   hashExternalIdForMeta,
@@ -86,6 +88,14 @@ export function metaPurchaseEventId(orderId: string): string {
   return hashExternalIdForMeta(orderId);
 }
 
+/** Fresh id for manual resends so Meta does not dedupe against the primary Purchase. */
+export function metaPurchaseResendEventId(orderId: string): string {
+  const nonce = randomBytes(8).toString("hex");
+  const candidate = `pur_${orderId}_r_${nonce}`;
+  if (candidate.length <= META_EVENT_ID_MAX_LEN) return candidate;
+  return hashExternalIdForMeta(candidate);
+}
+
 function resolveWabaId(params: MetaPurchaseParams): string {
   return (
     normalizeMetaEnvId(params.whatsappBusinessAccountId ?? undefined) ||
@@ -101,11 +111,13 @@ function resolveWabaId(params: MetaPurchaseParams): string {
  */
 export function buildMetaPurchasePayload(
   params: MetaPurchaseParams,
+  options?: { eventIdOverride?: string },
 ): { payload: Record<string, unknown>; eventId: string } {
   const testEventCode = readTestEventCodeForPayload();
   const eventName = testEventCode ? "TestEvent" : "Purchase";
   const eventTime = Math.floor(params.orderCreatedAt.getTime() / 1000);
-  const eventId = metaPurchaseEventId(params.orderId);
+  const eventId =
+    options?.eventIdOverride?.trim() || metaPurchaseEventId(params.orderId);
   const wabaId = resolveWabaId(params);
   const clid = params.ctwaClid?.trim() || null;
 
@@ -183,8 +195,14 @@ export function serializeMetaPayload(payload: Record<string, unknown>): string {
   return JSON.stringify(payload, null, 2);
 }
 
+export type SendMetaPurchaseEventOptions = {
+  /** Use when replaying Purchase after Meta missed the primary send (new dedupe key). */
+  eventIdOverride?: string;
+};
+
 export async function sendMetaPurchaseEvent(
   params: MetaPurchaseParams,
+  options?: SendMetaPurchaseEventOptions,
 ): Promise<MetaPurchaseResult> {
   const datasetId =
     normalizeMetaEnvId(process.env.META_DATASET_ID) ||
@@ -206,7 +224,9 @@ export async function sendMetaPurchaseEvent(
     }
   }
 
-  const { payload, eventId } = buildMetaPurchasePayload(params);
+  const { payload, eventId } = buildMetaPurchasePayload(params, {
+    eventIdOverride: options?.eventIdOverride,
+  });
   const payloadJson = serializeMetaPayload(payload);
 
   const url = new URL(
@@ -229,6 +249,7 @@ export async function sendMetaPurchaseEvent(
       error_subcode?: number;
     };
     events_received?: number;
+    fbtrace_id?: string;
   };
 
   if (!res.ok) {
@@ -244,6 +265,19 @@ export async function sendMetaPurchaseEvent(
       typeof err?.error_user_msg === "string" ? err.error_user_msg : "";
     const msg = detail && detail !== base ? `${base} — ${detail}` : base;
     throw new Error(msg);
+  }
+
+  if (typeof json.events_received === "number" && json.events_received < 1) {
+    const trace =
+      typeof json.fbtrace_id === "string" ? json.fbtrace_id : "";
+    if (trace && process.env.NODE_ENV === "development") {
+      console.error("[Meta CAPI] fbtrace_id:", trace);
+    }
+    throw new Error(
+      trace
+        ? `Meta accepted the request but reported events_received=0 (fbtrace_id ${trace}). Check META_DATASET_ID and Events Manager Test vs Live.`
+        : "Meta accepted the request but reported events_received=0. Check META_DATASET_ID and Events Manager Test vs Live.",
+    );
   }
 
   return { eventId, payloadJson };

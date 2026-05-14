@@ -1,4 +1,12 @@
-/** CTWA / referral fields shared by WhatsApp inbound parsers (Meta Cloud API, etc.). */
+/**
+ * CTWA / referral fields shared by WhatsApp inbound parsers (Meta Cloud API, etc.).
+ *
+ * **Click id (`ctwa_clid`)**: Meta sends an opaque string (often base64url-style:
+ * letters, digits, `-`, `_`; sometimes `+` or `/` depending on encode). It is not a UUID.
+ * We persist it in Postgres `text` (UTF-8) and match on the exact stored value; ingest uses
+ * `.trim()` only so leading/trailing whitespace from relays does not break lookups. Do not strip
+ * or re-encode interior characters—doing so would desync from Meta’s attribution keys.
+ */
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === "object" && !Array.isArray(v)
@@ -50,6 +58,7 @@ function firstTrimmedNonEmpty(...vals: unknown[]): string | null {
 /**
  * Meta Cloud API snake_case (`ctwa_clid`) and relays that camelCase (`ctwaClid`).
  * Checks top-level referral, nested `text.referral`, then deep search for either key name.
+ * Returned value is trimmed; inner characters are preserved.
  */
 export function findCtwaClid(obj: unknown): string | null {
   const msg = asRecord(obj);

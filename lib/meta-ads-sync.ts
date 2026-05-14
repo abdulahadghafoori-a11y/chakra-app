@@ -12,6 +12,7 @@ import {
   messagingConversationsStartedFromActions,
   parseActionsFromInsight,
 } from "@/lib/meta-insights-actions";
+import { parseInsightsFrequencyRaw } from "@/lib/meta-insights-quality";
 import {
   fetchAdById,
   fetchAdInsightsDailyRange,
@@ -387,6 +388,10 @@ export async function syncAdInsightsDailyRange(
       messagingConversationsStartedFromActions(actionRows);
     const metaPurchases = metaPurchasesFromActions(actionRows);
 
+    const freqVal = parseInsightsFrequencyRaw(row.frequency);
+    const qualityRank = row.quality_ranking?.trim() || null;
+    const freqDb = freqVal != null ? String(freqVal) : null;
+
     try {
       await db
         .insert(adInsightsDaily)
@@ -400,6 +405,8 @@ export async function syncAdInsightsDailyRange(
           clicks: Number.isFinite(clicks) ? clicks : 0,
           messagingConversationsStarted: messagingStarted,
           metaPurchases,
+          frequency: freqDb,
+          qualityRanking: qualityRank,
           currency,
           syncedAt: t,
         })
@@ -413,6 +420,8 @@ export async function syncAdInsightsDailyRange(
             clicks: sql`excluded.clicks`,
             messagingConversationsStarted: sql`excluded.messaging_conversations_started`,
             metaPurchases: sql`excluded.meta_purchases`,
+            frequency: sql`excluded.frequency`,
+            qualityRanking: sql`excluded.quality_ranking`,
             currency: sql`excluded.currency`,
             syncedAt: t,
           },

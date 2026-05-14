@@ -7,15 +7,26 @@ import { revalidatePath } from "next/cache";
 import {
   contacts,
   ctwaSessions,
+  metaCampaigns,
   orderItems,
   orders,
   products,
 } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import { getAppFxUsdAfnRow } from "@/lib/app-fx-usd-afn";
+import {
+  afnAmountToUsd2,
+  estimateAfnWholeFromStoredUsd,
+  formatUsd2,
+  parseAfnPerOneUsdFromDb,
+  roundAfnWhole,
+} from "@/lib/fx-afn-usd";
 import {
   buildMetaPurchasePayload,
+  metaPurchaseResendEventId,
   sendMetaPurchaseEvent,
   serializeMetaPayload,
+  type MetaPurchaseParams,
 } from "@/lib/meta-capi";
 import {
   isWithinMetaEventTimeWindow,
@@ -27,12 +38,18 @@ import {
   buildMetaPurchaseParamsFromContext,
   loadOrderPurchaseCapiContext,
 } from "@/lib/order-meta-capi";
+import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 import {
   APP_CURRENCY,
   createOrderSchema,
   type CreateOrderInput,
+  deleteOrderSchema,
+  linkOrderManualCampaignSchema,
   orderStatusEligibleForPurchaseCapi,
+  resendOrderPurchaseCapiBaseSchema,
+  resendOrderPurchaseCapiSchema,
+  updateOrderMetadataSchema,
   updateOrderStatusSchema,
   type UpdateOrderStatusInput,
 } from "@/lib/validations/order";
@@ -58,6 +75,29 @@ const CAPI_DEFERRED_PAYLOAD_JSON = JSON.stringify(
   null,
   2,
 );
+
+async function resolveOrderUsdAfnRate(): Promise<
+  { afnPerOneUsd: number; snapshot: string } | { error: string }
+> {
+  const row = await getAppFxUsdAfnRow();
+  if (!row) {
+    return {
+      error:
+        "USD→AFN rate is missing. Staff must set how many AFN equal exactly 1.00 USD (Create order page or database) before converting line items.",
+    };
+  }
+  const snapshotRaw =
+    typeof row.afnPerOneUsd === "string"
+      ? row.afnPerOneUsd.trim()
+      : String(row.afnPerOneUsd);
+  const afnPerOneUsd = Number(snapshotRaw);
+  if (!Number.isFinite(afnPerOneUsd) || afnPerOneUsd <= 0) {
+    return {
+      error: "Invalid FX rate in the database. Ask staff to fix AFN per 1 USD.",
+    };
+  }
+  return { afnPerOneUsd, snapshot: snapshotRaw };
+}
 
 export async function previewOrderCapiPayload(
   input: CreateOrderInput,
@@ -97,26 +137,26 @@ export async function previewOrderCapiPayload(
     .where(inArray(products.id, productIds));
   const productById = new Map(productRows.map((p) => [p.id, p]));
 
-  type ResolvedLine = {
-    product: (typeof productRows)[0];
-    quantity: number;
-    unit: number;
-    lineValue: number;
-  };
-
-  const resolved: ResolvedLine[] = [];
-  for (const line of data.lines) {
-    const p = productById.get(line.productId);
-    if (!p) {
-      return { ok: false, error: "One or more products were not found." };
-    }
-    const unit = line.unitSalePrice;
-    const qty = line.quantity;
-    const lineValue = unit * qty;
-    resolved.push({ product: p, quantity: qty, unit, lineValue });
+  const fx = await resolveOrderUsdAfnRate();
+  if ("error" in fx) {
+    return { ok: false, error: fx.error };
   }
 
-  const orderTotal = resolved.reduce((s, r) => s + r.lineValue, 0);
+  const conv = convertOrderFormLinesFromAfn(
+    data.lines.map((l) => ({
+      productId: l.productId,
+      unitSalePrice: l.unitSalePrice,
+      quantity: l.quantity,
+    })),
+    productById,
+    fx.afnPerOneUsd,
+  );
+  if (!conv.ok) {
+    return { ok: false, error: conv.error };
+  }
+
+  const resolved = conv.resolved;
+  const orderTotal = conv.orderTotalUsd;
   const totalQuantity = resolved.reduce((s, r) => s + r.quantity, 0);
 
   if (!orderStatusEligibleForPurchaseCapi(data.status)) {
@@ -144,6 +184,42 @@ export async function previewOrderCapiPayload(
     .orderBy(desc(ctwaSessions.sendTime))
     .limit(1);
 
+  if (!latestSession?.id) {
+    const [anyCampaign] = await db
+      .select({ id: metaCampaigns.id })
+      .from(metaCampaigns)
+      .limit(1);
+    const mc = data.manualMetaCampaignId?.trim() ?? "";
+
+    if (!mc) {
+      if (!anyCampaign) {
+        return {
+          ok: false,
+          error:
+            "This contact has no WhatsApp CTWA session. Open Campaigns and run Sync from Meta, then choose a Meta campaign before previewing.",
+        };
+      }
+      return {
+        ok: false,
+        error:
+          "Select a Meta campaign. Orders without a WhatsApp CTWA session must be attributed manually.",
+      };
+    }
+
+    const [campRow] = await db
+      .select({ id: metaCampaigns.id })
+      .from(metaCampaigns)
+      .where(eq(metaCampaigns.id, mc))
+      .limit(1);
+    if (!campRow) {
+      return {
+        ok: false,
+        error:
+          "Selected Meta campaign was not found. Sync from Meta on Campaigns, then retry.",
+      };
+    }
+  }
+
   const ctwaClid = latestSession?.ctwaClid?.trim() || null;
   const wabaId = latestSession?.wabaId ?? null;
 
@@ -169,7 +245,7 @@ export async function previewOrderCapiPayload(
       sku: r.product.sku,
       productName: r.product.name,
       quantity: r.quantity,
-      lineValue: r.lineValue,
+      lineValue: r.lineUsd,
     })),
     ctwaClid,
     whatsappBusinessAccountId: wabaId,
@@ -180,13 +256,18 @@ export async function previewOrderCapiPayload(
 }
 
 export type OrderConfirmationRow = {
-  order: typeof orders.$inferSelect;
+  order: typeof orders.$inferSelect & {
+    /** Whole AFN from `value` USD × `afnPerUsdSnapshot`; null if no snapshot */
+    valueAfn: string | null;
+  };
   contact: typeof contacts.$inferSelect;
   lines: Array<{
     lineIndex: number;
     quantity: number;
     unitSalePrice: string;
+    unitSalePriceAfn: string | null;
     lineValue: string;
+    lineValueAfn: string | null;
     productName: string;
     sku: string;
   }>;
@@ -223,7 +304,36 @@ export async function getOrderConfirmation(
     .where(eq(orderItems.orderId, orderId))
     .orderBy(orderItems.lineIndex);
 
-  return { order, contact, lines: rows };
+  const snapshot = order.afnPerUsdSnapshot;
+
+  const merchandiseAfn = estimateAfnWholeFromStoredUsd(
+    Number(order.value),
+    snapshot,
+  );
+
+  return {
+    order: {
+      ...order,
+      valueAfn: merchandiseAfn == null ? null : String(merchandiseAfn),
+    },
+    contact,
+    lines: rows.map((r) => {
+      const unitUsd = Number(r.unitSalePrice);
+      const lineUsd = Number(r.lineValue);
+      const unitAfn = estimateAfnWholeFromStoredUsd(unitUsd, snapshot);
+      const lineAfn = estimateAfnWholeFromStoredUsd(lineUsd, snapshot);
+      return {
+        lineIndex: r.lineIndex,
+        quantity: r.quantity,
+        unitSalePrice: String(r.unitSalePrice),
+        unitSalePriceAfn: unitAfn == null ? null : String(unitAfn),
+        lineValue: String(r.lineValue),
+        lineValueAfn: lineAfn == null ? null : String(lineAfn),
+        productName: r.productName,
+        sku: r.sku,
+      };
+    }),
+  };
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
@@ -262,26 +372,26 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     .where(inArray(products.id, productIds));
   const productById = new Map(productRows.map((p) => [p.id, p]));
 
-  type ResolvedLine = {
-    product: (typeof productRows)[0];
-    quantity: number;
-    unit: number;
-    lineValue: number;
-  };
-
-  const resolved: ResolvedLine[] = [];
-  for (const line of data.lines) {
-    const p = productById.get(line.productId);
-    if (!p) {
-      return { ok: false, error: "One or more products were not found." };
-    }
-    const unit = line.unitSalePrice;
-    const qty = line.quantity;
-    const lineValue = unit * qty;
-    resolved.push({ product: p, quantity: qty, unit, lineValue });
+  const fx = await resolveOrderUsdAfnRate();
+  if ("error" in fx) {
+    return { ok: false, error: fx.error };
   }
 
-  const orderTotal = resolved.reduce((s, r) => s + r.lineValue, 0);
+  const conv = convertOrderFormLinesFromAfn(
+    data.lines.map((l) => ({
+      productId: l.productId,
+      unitSalePrice: l.unitSalePrice,
+      quantity: l.quantity,
+    })),
+    productById,
+    fx.afnPerOneUsd,
+  );
+  if (!conv.ok) {
+    return { ok: false, error: conv.error };
+  }
+
+  const resolved = conv.resolved;
+  const orderTotal = conv.orderTotalUsd;
   const totalQuantity = resolved.reduce((s, r) => s + r.quantity, 0);
 
   const orderPk = data.orderId?.trim() || `ORD-${nanoid(10).toUpperCase()}`;
@@ -307,6 +417,56 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     .orderBy(desc(ctwaSessions.sendTime))
     .limit(1);
 
+  let manualCampaignIdToSave: string | null = null;
+  if (!latestSession?.id) {
+    const [anyCampaign] = await db
+      .select({ id: metaCampaigns.id })
+      .from(metaCampaigns)
+      .limit(1);
+
+    const mc = data.manualMetaCampaignId?.trim() ?? "";
+
+    if (!mc) {
+      if (!anyCampaign) {
+        return {
+          ok: false,
+          error:
+            "This contact has no WhatsApp CTWA session. Open Campaigns and run Sync from Meta, then select a Meta campaign for this order.",
+        };
+      }
+      return {
+        ok: false,
+        error:
+          "Select a Meta campaign. Orders without a WhatsApp CTWA session must be attributed manually.",
+      };
+    }
+
+    const [campRow] = await db
+      .select({ id: metaCampaigns.id })
+      .from(metaCampaigns)
+      .where(eq(metaCampaigns.id, mc))
+      .limit(1);
+    if (!campRow) {
+      return {
+        ok: false,
+        error:
+          "Selected Meta campaign was not found. Sync from Meta on Campaigns, then retry.",
+      };
+    }
+    manualCampaignIdToSave = mc;
+  }
+
+  const provinceToSave =
+    data.interProvinceAfghanistanDelivery &&
+    data.deliveryProvinceAfghanistan.trim()
+      ? data.deliveryProvinceAfghanistan.trim()
+      : null;
+  const trackingToSave =
+    data.interProvinceAfghanistanDelivery &&
+    data.deliveryTrackingNumber.trim()
+      ? data.deliveryTrackingNumber.trim()
+      : null;
+
   const ctwaClid = latestSession?.ctwaClid?.trim() || null;
   const wabaId = latestSession?.wabaId ?? null;
   const capiEligible = orderStatusEligibleForPurchaseCapi(data.status);
@@ -328,7 +488,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         sku: r.product.sku,
         productName: r.product.name,
         quantity: r.quantity,
-        lineValue: r.lineValue,
+        lineValue: r.lineUsd,
       })),
       ctwaClid,
       whatsappBusinessAccountId: wabaId,
@@ -346,6 +506,13 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       return { ok: false, error: message };
     }
   }
+  const deliveryAfn = data.interProvinceAfghanistanDelivery
+    ? roundAfnWhole(data.deliveryCost)
+    : 0;
+  const deliveryUsd = afnAmountToUsd2(deliveryAfn, fx.afnPerOneUsd);
+  if (!Number.isFinite(deliveryUsd) || deliveryUsd < 0) {
+    return { ok: false, error: "Invalid courier fee in AFN." };
+  }
 
   const [inserted] = await db
     .insert(orders)
@@ -353,16 +520,19 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       id: orderPk,
       contactId: contact.id,
       ctwaSessionId: latestSession?.id ?? null,
-      value: orderTotal.toFixed(4),
+      manualMetaCampaignId: manualCampaignIdToSave,
+      value: formatUsd2(orderTotal),
       currency: APP_CURRENCY,
       status: data.status,
       capiSent,
       capiEventId: capiSent ? eventId : null,
-      deliveryCost: data.deliveryCost.toFixed(4),
+      deliveryCost: formatUsd2(deliveryUsd),
+      deliveryProvinceAfghanistan: provinceToSave,
+      deliveryTrackingNumber: trackingToSave,
       returnCost: "0",
       codFee: "0",
-      createdAt: orderEventAt,
-      updatedAt: orderEventAt,
+      afnPerUsdSnapshot: fx.snapshot,
+      orderEventAt,
     })
     .returning();
 
@@ -386,8 +556,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           lineIndex,
           productId: r.product.id,
           quantity: r.quantity,
-          unitSalePrice: r.unit.toFixed(4),
-          lineValue: r.lineValue.toFixed(4),
+          unitSalePrice: formatUsd2(r.unitUsd),
+          lineValue: formatUsd2(r.lineUsd),
           unitCogs: safeUnitCogs.toFixed(4),
           lineCogs: lineCogs.toFixed(4),
         };
@@ -527,4 +697,351 @@ export async function updateOrderStatus(
     capiEventId,
     capiPayloadJson,
   };
+}
+
+export type LinkOrderManualCampaignResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Staff-only: attribute an order with no WhatsApp CTWA session to a synced Meta campaign.
+ * When `ctwa_session_id` is set, rollups prefer the Meta ad path instead.
+ */
+export async function linkOrderManualCampaign(
+  raw: unknown,
+): Promise<LinkOrderManualCampaignResult> {
+  await assertStaffSession();
+  const parsed = linkOrderManualCampaignSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+  const { orderId, metaCampaignId } = parsed.data;
+
+  const [order] = await db
+    .select({
+      id: orders.id,
+      ctwaSessionId: orders.ctwaSessionId,
+    })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!order) return { ok: false, error: "Order not found." };
+  if (order.ctwaSessionId != null) {
+    return {
+      ok: false,
+      error:
+        "This order is linked to a WhatsApp CTWA session. Manual campaign attribution is not available.",
+    };
+  }
+
+  if (metaCampaignId === "") {
+    await db
+      .update(orders)
+      .set({
+        manualMetaCampaignId: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId));
+
+    revalidatePath("/campaigns");
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`/orders/${orderId}/confirmation`);
+
+    return { ok: true };
+  }
+
+  const [campRow] = await db
+    .select({ id: metaCampaigns.id })
+    .from(metaCampaigns)
+    .where(eq(metaCampaigns.id, metaCampaignId))
+    .limit(1);
+
+  if (!campRow) {
+    return {
+      ok: false,
+      error:
+        "That campaign is not in your database yet. Run “Sync from Meta” on Campaigns.",
+    };
+  }
+
+  await db
+    .update(orders)
+    .set({
+      manualMetaCampaignId: metaCampaignId,
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, orderId));
+
+  revalidatePath("/campaigns");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/confirmation`);
+
+  return { ok: true };
+}
+
+export type DeleteOrderResult = { ok: true } | { ok: false; error: string };
+
+export async function deleteOrder(raw: unknown): Promise<DeleteOrderResult> {
+  await assertStaffSession();
+
+  const parsed = deleteOrderSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { orderId } = parsed.data;
+
+  const [row] = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, error: "Order not found." };
+  }
+
+  await db.delete(orders).where(eq(orders.id, row.id));
+
+  revalidatePath("/campaigns");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/confirmation`);
+
+  return { ok: true };
+}
+
+export type UpdateOrderMetadataResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export async function updateOrderMetadata(
+  raw: unknown,
+): Promise<UpdateOrderMetadataResult> {
+  await assertStaffSession();
+
+  const parsed = updateOrderMetadataSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const data = parsed.data;
+
+  const [orderRow] = await db
+    .select({
+      id: orders.id,
+      afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
+    })
+    .from(orders)
+    .where(eq(orders.id, data.orderId))
+    .limit(1);
+
+  if (!orderRow) {
+    return { ok: false, error: "Order not found." };
+  }
+
+  const snapshotStr =
+    typeof orderRow.afnPerUsdSnapshot === "string"
+      ? orderRow.afnPerUsdSnapshot.trim()
+      : "";
+  const afnPerOneUsd = parseAfnPerOneUsdFromDb(snapshotStr || undefined);
+
+  let deliveryUsd = 0;
+  let provinceToSave: string | null = null;
+  let trackingToSave: string | null = null;
+
+  if (data.interProvinceAfghanistanDelivery) {
+    if (!(Number.isFinite(afnPerOneUsd) && afnPerOneUsd > 0)) {
+      return {
+        ok: false,
+        error:
+          "This order has no valid AFN→USD snapshot; fix data or recreate the order before editing provincial courier.",
+      };
+    }
+    provinceToSave = data.deliveryProvinceAfghanistan.trim() || null;
+    trackingToSave = data.deliveryTrackingNumber.trim() || null;
+    const deliveryAfn = roundAfnWhole(data.deliveryCost);
+    deliveryUsd = afnAmountToUsd2(deliveryAfn, afnPerOneUsd);
+    if (!Number.isFinite(deliveryUsd) || deliveryUsd < 0) {
+      return { ok: false, error: "Invalid courier fee in AFN." };
+    }
+  }
+
+  await db
+    .update(orders)
+    .set({
+      deliveryCost: formatUsd2(deliveryUsd),
+      deliveryProvinceAfghanistan: provinceToSave,
+      deliveryTrackingNumber: trackingToSave,
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, orderRow.id));
+
+  revalidatePath("/campaigns");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderRow.id}`);
+  revalidatePath(`/orders/${orderRow.id}/confirmation`);
+
+  return { ok: true };
+}
+
+async function resolveResendPurchaseMetaParams(
+  orderId: string,
+  capiEventTimeKabul: string,
+): Promise<
+  | { ok: false; error: string }
+  | { ok: true; params: MetaPurchaseParams }
+> {
+  const [orderRow] = await db
+    .select({
+      id: orders.id,
+      status: orders.status,
+    })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!orderRow) {
+    return { ok: false, error: "Order not found." };
+  }
+
+  if (!orderStatusEligibleForPurchaseCapi(orderRow.status)) {
+    return {
+      ok: false,
+      error:
+        "Resend Purchase only when status is Confirmed or Paid.",
+    };
+  }
+
+  let orderEventAt: Date;
+  try {
+    orderEventAt = kabulDateTimeLocalToDate(capiEventTimeKabul);
+  } catch {
+    return { ok: false, error: "Invalid event time (Kabul)." };
+  }
+
+  if (!isWithinMetaEventTimeWindow(orderEventAt)) {
+    return {
+      ok: false,
+      error:
+        "Event time cannot be more than 7 days in the past (Meta CAPI limit).",
+    };
+  }
+
+  const ctx = await loadOrderPurchaseCapiContext(orderId);
+  if (!ctx) {
+    return { ok: false, error: "Could not load order for Meta CAPI." };
+  }
+
+  const params = buildMetaPurchaseParamsFromContext(ctx, orderEventAt);
+  return { ok: true, params };
+}
+
+export type PrepareResendOrderPurchaseCapiResult =
+  | { ok: true; payloadJson: string; eventIdOverride: string }
+  | { ok: false; error: string };
+
+export async function prepareResendOrderPurchaseCapi(
+  raw: unknown,
+): Promise<PrepareResendOrderPurchaseCapiResult> {
+  await assertStaffSession();
+
+  const parsed = resendOrderPurchaseCapiBaseSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { orderId, capiEventTimeKabul } = parsed.data;
+
+  const resolved = await resolveResendPurchaseMetaParams(
+    orderId,
+    capiEventTimeKabul,
+  );
+  if (!resolved.ok) return resolved;
+
+  const eventIdOverride = metaPurchaseResendEventId(orderId);
+  const { payload, eventId } = buildMetaPurchasePayload(resolved.params, {
+    eventIdOverride,
+  });
+
+  return {
+    ok: true,
+    payloadJson: serializeMetaPayload(payload),
+    eventIdOverride: eventId,
+  };
+}
+
+export type ResendOrderPurchaseCapiResult =
+  | { ok: true; capiEventId: string; capiPayloadJson: string }
+  | { ok: false; error: string };
+
+export async function resendOrderPurchaseCapi(
+  raw: unknown,
+): Promise<ResendOrderPurchaseCapiResult> {
+  await assertStaffSession();
+
+  const parsed = resendOrderPurchaseCapiSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { orderId, capiEventTimeKabul, eventIdOverride: clientOverride } =
+    parsed.data;
+
+  const resolved = await resolveResendPurchaseMetaParams(
+    orderId,
+    capiEventTimeKabul,
+  );
+  if (!resolved.ok) return resolved;
+
+  const eventIdOverride =
+    clientOverride?.trim() || metaPurchaseResendEventId(orderId);
+
+  try {
+    const result = await sendMetaPurchaseEvent(resolved.params, {
+      eventIdOverride,
+    });
+    await db
+      .update(orders)
+      .set({
+        capiSent: true,
+        capiEventId: result.eventId,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId));
+
+    revalidatePath("/campaigns");
+    revalidatePath("/orders");
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`/orders/${orderId}/confirmation`);
+
+    return {
+      ok: true,
+      capiEventId: result.eventId,
+      capiPayloadJson: result.payloadJson,
+    };
+  } catch (e) {
+    console.error("[resendOrderPurchaseCapi] Meta CAPI failed", e);
+    const message =
+      e instanceof Error ? e.message : "Meta CAPI request failed";
+    return { ok: false, error: message };
+  }
 }

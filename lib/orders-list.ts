@@ -1,22 +1,25 @@
 import { desc, eq, inArray } from "drizzle-orm";
 
+import { contacts, orderItems, orders, products } from "@/drizzle/schema";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import {
-  contacts,
-  ctwaSessions,
-  orderItems,
-  orders,
-  products,
-} from "@/drizzle/schema";
+  estimateAfnWholeFromStoredUsd,
+  formatUsd2,
+} from "@/lib/fx-afn-usd";
 import { db } from "@/lib/db";
 
 export type OrderTableRow = {
   id: string;
   phone: string;
   contactId: string;
-  ctwa: string | null;
   value: string;
+  /** Whole AFN derived from `value` USD + `afn_per_usd_snapshot`; null if no snapshot */
+  valueAfn: string | null;
   currency: string;
   capiSent: boolean;
+  /** Wall-clock order time from staff form / Meta context. */
+  orderEventAt: Date;
+  /** When this row was saved to the database. */
   createdAt: Date;
 };
 
@@ -28,7 +31,7 @@ export type OrderLineSummary = {
 };
 
 /**
- * Orders for a list table (phone, CTWA, CAPI, totals) with optional contact filter.
+ * Orders for a list table (phone, CAPI, totals) with optional contact filter.
  */
 export async function loadOrdersTableRows(options: {
   limit: number;
@@ -39,15 +42,15 @@ export async function loadOrdersTableRows(options: {
       id: orders.id,
       phone: contacts.phoneNumber,
       contactId: contacts.id,
-      ctwa: ctwaSessions.ctwaClid,
       value: orders.value,
+      afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
       currency: orders.currency,
       capiSent: orders.capiSent,
+      orderEventAt: orders.orderEventAt,
       createdAt: orders.createdAt,
     })
     .from(orders)
-    .innerJoin(contacts, eq(orders.contactId, contacts.id))
-    .leftJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id));
+    .innerJoin(contacts, eq(orders.contactId, contacts.id));
 
   const rows = await (options.filterContactId
     ? base.where(eq(orders.contactId, options.filterContactId))
@@ -56,16 +59,23 @@ export async function loadOrdersTableRows(options: {
     .orderBy(desc(orders.createdAt))
     .limit(options.limit);
 
-  return rows.map((r) => ({
-    id: r.id,
-    phone: r.phone,
-    contactId: r.contactId,
-    ctwa: r.ctwa,
-    value: String(r.value),
-    currency: r.currency,
-    capiSent: r.capiSent,
-    createdAt: r.createdAt,
-  }));
+  return rows.map((r) => {
+    const derived = estimateAfnWholeFromStoredUsd(
+      Number(r.value),
+      r.afnPerUsdSnapshot,
+    );
+    return {
+      id: r.id,
+      phone: r.phone,
+      contactId: r.contactId,
+      value: String(r.value),
+      valueAfn: derived == null ? null : String(derived),
+      currency: r.currency,
+      capiSent: r.capiSent,
+      orderEventAt: r.orderEventAt,
+      createdAt: r.createdAt,
+    };
+  });
 }
 
 export async function loadOrderLineSummaries(
@@ -105,12 +115,12 @@ export function groupLinesByOrderId(
 }
 
 export function formatOrderTableWhen(d: Date) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  } catch {
-    return d.toISOString();
-  }
+  return formatDateTimeKabul(d);
+}
+
+/** Stored USD numeric string → display with exactly two fraction digits. */
+export function formatOrderUsdTable(amountStr: string): string {
+  const n = Number.parseFloat(amountStr);
+  if (!Number.isFinite(n)) return amountStr;
+  return formatUsd2(n);
 }

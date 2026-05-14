@@ -5,6 +5,7 @@ import { OrderDetailClient } from "./order-detail-client";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { loadOrderDetail } from "@/lib/order-detail";
+import { listMetaCampaignsForManualAttribution } from "@/lib/campaigns-rollups";
 import { formatOrderTableWhen } from "@/lib/orders-list";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +24,10 @@ function money(amount: string, currency: string) {
 
 export default async function OrderDetailPage({ params }: Props) {
   const { orderId } = await params;
-  const order = await loadOrderDetail(orderId);
+  const [order, metaCampaignOptions] = await Promise.all([
+    loadOrderDetail(orderId),
+    listMetaCampaignsForManualAttribution(),
+  ]);
   if (!order) notFound();
 
   return (
@@ -59,8 +63,20 @@ export default async function OrderDetailPage({ params }: Props) {
                 <span className="font-mono text-xs">{order.ctwaClid}</span>
               </>
             ) : null}
+            {order.manualMetaCampaignId ? (
+              <>
+                {" "}
+                · Campaign (manual){" "}
+                <span className="font-mono text-xs">
+                  {(order.manualCampaignName ?? "").trim() ||
+                    order.manualMetaCampaignId}
+                </span>
+              </>
+            ) : null}
             {" "}
-            · {formatOrderTableWhen(order.createdAt)}
+            · Recorded {formatOrderTableWhen(order.createdAt)}
+            {" · Order event "}
+            {formatOrderTableWhen(order.orderEventAt)}
           </p>
           <p className="text-lg font-medium tabular-nums">
             Total {money(order.value, order.currency)}
@@ -68,16 +84,17 @@ export default async function OrderDetailPage({ params }: Props) {
         </div>
         <Link
           href={`/orders/${encodeURIComponent(order.id)}/confirmation`}
+          title="Read-only summary you can share with the customer (opens in-app)."
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
             "shrink-0 self-start",
           )}
         >
-          Customer confirmation
+          Customer receipt (share)
         </Link>
       </div>
 
-      <OrderDetailClient order={order} />
+      <OrderDetailClient order={order} metaCampaignOptions={metaCampaignOptions} />
     </div>
   );
 }

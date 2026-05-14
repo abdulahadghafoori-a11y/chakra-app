@@ -13,6 +13,7 @@ import {
 import { SalesSignOutButton } from "@/components/sales-sign-out-button";
 import { Separator } from "@/components/ui/separator";
 import { getSalesConversationDetail } from "@/lib/sales-inbox/data";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import { cn } from "@/lib/utils";
 
 import {
@@ -157,7 +158,7 @@ export default async function SalesConversationPage({
             <CardTitle className="text-base">Handoff</CardTitle>
             <CardDescription>
               {conversation.handoffAt
-                ? conversation.handoffAt.toISOString()
+                ? formatDateTimeKabul(conversation.handoffAt)
                 : ""}
             </CardDescription>
           </CardHeader>
@@ -223,7 +224,7 @@ export default async function SalesConversationPage({
                   {m.role}
                 </Badge>
                 <span className="text-muted-foreground text-xs">
-                  {m.createdAt.toISOString()}
+                  {formatDateTimeKabul(m.createdAt)}
                 </span>
               </div>
               <p className="mt-1 whitespace-pre-wrap text-sm">{m.content}</p>

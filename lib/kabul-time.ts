@@ -3,6 +3,34 @@
  * Values from `<input type="datetime-local" />` are interpreted as Kabul, not the browser's local zone.
  */
 
+/** TZ for formatting DB instants (`timestamptz` stored as UTC) in the staff UI. */
+export const APP_DISPLAY_TIMEZONE = "Asia/Kabul";
+
+const KABUL_DATE_MEDIUM_SHORT: Intl.DateTimeFormatOptions = {
+  timeZone: APP_DISPLAY_TIMEZONE,
+  dateStyle: "medium",
+  timeStyle: "short",
+};
+
+/**
+ * Format a UTC instant (from Postgres) as date + time in Kabul for tables and lists.
+ */
+export function formatDateTimeKabul(
+  input: Date | string | null | undefined,
+): string {
+  if (input == null || input === "") return "—";
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return "—";
+  try {
+    return new Intl.DateTimeFormat(
+      "en-GB",
+      KABUL_DATE_MEDIUM_SHORT,
+    ).format(date);
+  } catch {
+    return "—";
+  }
+}
+
 const KABUL_OFFSET = "+04:30";
 
 const KABUL_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
@@ -45,11 +73,7 @@ export function describeKabulLocalForMeta(value: string): {
 } {
   const d = kabulDateTimeLocalToDate(value);
   const unixSeconds = Math.floor(d.getTime() / 1000);
-  const kabulLabel = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kabul",
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(d);
+  const kabulLabel = formatDateTimeKabul(d);
   return { kabulLabel, unixSeconds };
 }
 

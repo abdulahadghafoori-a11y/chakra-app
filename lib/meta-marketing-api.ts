@@ -215,6 +215,8 @@ export type InsightAdRow = {
   date_start?: string;
   date_stop?: string;
   account_currency?: string;
+  frequency?: string;
+  quality_ranking?: string;
   /** Breakdown rows from Insights API (messaging, purchases, …). */
   actions?: unknown;
 };
@@ -236,7 +238,7 @@ export async function fetchAdInsightsDailyRange(
     level: "ad",
     time_increment: "1",
     fields:
-      "ad_id,adset_id,campaign_id,impressions,clicks,spend,date_start,date_stop,account_currency,actions",
+      "ad_id,adset_id,campaign_id,impressions,clicks,spend,date_start,date_stop,account_currency,actions,frequency,quality_ranking",
     time_range: timeRange,
     action_attribution_windows: actionAttributionWindows,
     limit: "500",

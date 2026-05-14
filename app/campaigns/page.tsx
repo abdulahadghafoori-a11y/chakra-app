@@ -1,10 +1,11 @@
+import { parseCampaignPnLFractions } from "@/lib/campaign-pnl-params";
 import { parseCampaignRangeSearchParams } from "@/lib/campaign-insights-range";
 import {
   getCampaignPerformanceRollups,
   getUnattributedOrderTotals,
   getUnlinkedCtwaOrderTotals,
-  loadMetaCampaignTreeFromDb,
 } from "@/lib/campaigns-rollups";
+import { APP_CURRENCY } from "@/lib/validations/order";
 
 import { CampaignsClient } from "./campaigns-client";
 
@@ -15,6 +16,8 @@ type SearchParams = {
   from?: string;
   to?: string;
   days?: string;
+  fee_pct?: string;
+  sales_pct?: string;
 };
 
 export default async function CampaignsPage({
@@ -24,18 +27,18 @@ export default async function CampaignsPage({
 }) {
   const sp = await searchParams;
   const parsed = parseCampaignRangeSearchParams(sp);
+  const pnlFractions = parseCampaignPnLFractions(sp);
   const [
-    tree,
     performance,
     unattributed,
     unlinkedCtwaOrders,
   ] = await Promise.all([
-    loadMetaCampaignTreeFromDb(),
     getCampaignPerformanceRollups(
       parsed.sinceIso,
       parsed.untilIso,
       parsed.sinceDay,
       parsed.untilDay,
+      pnlFractions,
     ),
     getUnattributedOrderTotals(parsed.sinceIso, parsed.untilIso),
     getUnlinkedCtwaOrderTotals(parsed.sinceIso, parsed.untilIso),
@@ -44,6 +47,11 @@ export default async function CampaignsPage({
   const totals = performance.reduce(
     (acc, r) => ({
       spend: acc.spend + r.spend,
+      paidAdSpend: acc.paidAdSpend + r.paidAdSpend,
+      cardSurchargeAmount: acc.cardSurchargeAmount + r.cardSurchargeAmount,
+      salesCommissionPaid:
+        acc.salesCommissionPaid + r.salesCommissionPaid,
+      paidOperationalCosts: acc.paidOperationalCosts + r.paidOperationalCosts,
       ctwaSessions: acc.ctwaSessions + r.ctwaSessions,
       metaMessagingConversationsStarted:
         acc.metaMessagingConversationsStarted +
@@ -54,10 +62,15 @@ export default async function CampaignsPage({
       metaPurchases: acc.metaPurchases + r.metaPurchases,
       convertedRevenue: acc.convertedRevenue + r.convertedRevenue,
       grossProfitPaid: acc.grossProfitPaid + r.grossProfitPaid,
-      contributionProfit: acc.contributionProfit + r.contributionProfit,
+      netProfitPaid: acc.netProfitPaid + r.netProfitPaid,
+      preFeeContribution: acc.preFeeContribution + r.preFeeContribution,
     }),
     {
       spend: 0,
+      paidAdSpend: 0,
+      cardSurchargeAmount: 0,
+      salesCommissionPaid: 0,
+      paidOperationalCosts: 0,
       ctwaSessions: 0,
       metaMessagingConversationsStarted: 0,
       ordersCount: 0,
@@ -66,7 +79,8 @@ export default async function CampaignsPage({
       metaPurchases: 0,
       convertedRevenue: 0,
       grossProfitPaid: 0,
-      contributionProfit: 0,
+      netProfitPaid: 0,
+      preFeeContribution: 0,
     },
   );
 
@@ -79,25 +93,37 @@ export default async function CampaignsPage({
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           COD cockpit: <strong>app</strong> CTWA sessions and{" "}
           <strong>converted orders</strong> (paid + confirmed) drive attribution
-          and P&amp;L for decisions. <strong>Meta</strong> messaging conversations
-          and purchase counts come from Ads Insights{" "}
-          <code className="bg-muted rounded px-1">actions</code> after &quot;Sync
-          from Meta&quot;—use both for optimization. Tune{" "}
-          <code className="bg-muted rounded px-1">CAMPAIGN_*</code> as needed.
+          and P&amp;L. Money uses <strong>{APP_CURRENCY}</strong> (
+          <code className="bg-muted rounded px-1">APP_CURRENCY</code>). Set{" "}
+          <strong>card surcharge</strong> on Meta Insights spend (<code className="bg-muted rounded px-1">
+            fee_pct
+          </code>
+          ; default +3%) and{" "}
+          <strong>sales commission</strong> on converted revenue (
+          <code className="bg-muted rounded px-1">sales_pct</code>, default 2%).{" "}
+          <strong>Net profit</strong> is gross profit (converted revenue −
+          COGS) minus payable Meta ads (with card fee), sales commission, and per-order delivery cost (
+          <code className="bg-muted rounded px-1">orders.delivery_cost</code>); verdicts use that net. After syncing insights, open{" "}
+          <strong>Columns</strong> to show Meta <strong>freq</strong>,{" "}
+          <strong>quality</strong>, and related 7-day signals (from{" "}
+          <code className="bg-muted rounded px-1">ad_insights_daily</code>). Tune{" "}
+          <code className="bg-muted rounded px-1">CAMPAIGN_*</code>{" "}
+          as needed.
         </p>
       </header>
 
       <CampaignsClient
-        tree={tree}
         performance={performance}
         totals={totals}
         unattributed={unattributed}
         unlinkedCtwaOrders={unlinkedCtwaOrders}
         rangeLabel={parsed.label}
+        rangeDisplayLabel={parsed.displayLabel}
         selectValue={parsed.selectValue}
         isCustom={parsed.isCustom}
         sinceDay={parsed.sinceDay}
         untilDay={parsed.untilDay}
+        pnlFractions={pnlFractions}
       />
     </div>
   );

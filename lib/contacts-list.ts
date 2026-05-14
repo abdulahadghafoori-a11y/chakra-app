@@ -76,7 +76,7 @@ export async function listContactsWithStats(input: {
         from orders o where o.contact_id = "contacts"."id"
       )`,
       lastOrderAt: sql<Date | null>`(
-        select max(o.created_at) from orders o where o.contact_id = "contacts"."id"
+        select max(o.order_event_at) from orders o where o.contact_id = "contacts"."id"
       )`,
       lastSessionAt: sql<Date | null>`(
         select max(s.send_time) from ctwa_sessions s where s.contact_id = "contacts"."id"

@@ -28,23 +28,15 @@ export default async function OrdersIndexPage() {
             whether Purchase was sent.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 self-start">
-          <Link
-            href="/expenses"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "shrink-0",
-            )}
-          >
-            Business expenses
-          </Link>
-          <Link
-            href="/orders/new"
-            className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
-          >
-            New order
-          </Link>
-        </div>
+        <Link
+          href="/orders/new"
+          className={cn(
+            buttonVariants({ size: "sm" }),
+            "shrink-0 self-start",
+          )}
+        >
+          New order
+        </Link>
       </div>
       <OrdersListTable rows={orderRows} itemsByOrder={itemsByOrder} />
     </div>

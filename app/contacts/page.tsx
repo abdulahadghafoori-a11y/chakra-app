@@ -12,31 +12,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listContactsWithStats } from "@/lib/contacts-list";
+import { listContactsWithStats, CONTACTS_PAGE_SIZE } from "@/lib/contacts-list";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import { getPhonePresentation } from "@/lib/phone-display";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = { q?: string; order?: string; page?: string };
-
-/** DB driver may return `Date` or ISO strings for `sql\`max(...)\`` columns. */
-function formatWhen(d: Date | string | null | undefined) {
-  if (d == null || d === "") return "—";
-  const date = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
-
-function formatCreated(d: Date | string) {
-  return formatWhen(d);
-}
 
 export default async function ContactsPage({
   searchParams,
@@ -53,6 +35,7 @@ export default async function ContactsPage({
     order,
     page: requestedPage,
   });
+  const rankOffset = (page - 1) * CONTACTS_PAGE_SIZE;
   if (total > 0 && requestedPage !== page) {
     const p = new URLSearchParams();
     if (q) p.set("q", q);
@@ -69,7 +52,9 @@ export default async function ContactsPage({
         </h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
           Search WhatsApp contacts, CTWA session counts, and order history. Created
-          time is when the contact first entered the system.
+          time is when the contact first entered the system. Timestamps use{" "}
+          <span className="text-foreground font-medium">Kabul</span> (UTC+4:30);
+          the database stores UTC.
         </p>
       </div>
 
@@ -85,6 +70,7 @@ export default async function ContactsPage({
           <Table className="min-w-[48rem]">
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 text-center tabular-nums">#</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead className="text-right tabular-nums">Sessions</TableHead>
@@ -103,7 +89,7 @@ export default async function ContactsPage({
                 <TableRow>
                   <TableCell
                     className="text-muted-foreground"
-                    colSpan={9}
+                    colSpan={10}
                   >
                     {q
                       ? "No contacts match this search."
@@ -111,11 +97,14 @@ export default async function ContactsPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((r) => {
+                rows.map((r, rowIndex) => {
                   const phone = getPhonePresentation(r.phoneNumber);
                   const lifetime = r.lifetimeValue ?? "0";
                   return (
                     <TableRow key={r.id}>
+                      <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
+                        {rankOffset + rowIndex + 1}
+                      </TableCell>
                       <TableCell>
                         <div className="max-w-[12rem] font-medium">
                           {r.name?.trim() || (
@@ -139,13 +128,13 @@ export default async function ContactsPage({
                         {Number.parseFloat(lifetime).toFixed(2)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {formatWhen(r.lastOrderAt)}
+                        {formatDateTimeKabul(r.lastOrderAt)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {formatWhen(r.lastSessionAt)}
+                        {formatDateTimeKabul(r.lastSessionAt)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {formatCreated(r.createTime)}
+                        {formatDateTimeKabul(r.createTime)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end sm:gap-1">

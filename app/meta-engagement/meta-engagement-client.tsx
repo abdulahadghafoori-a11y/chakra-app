@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import { cn } from "@/lib/utils";
 
 export type MetaEngagementCommentRow = {
@@ -42,19 +43,6 @@ export type MetaEngagementCommentRow = {
   parentPostId: string;
   createdAt: string;
 };
-
-function formatWhen(iso: string) {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  } catch {
-    return "—";
-  }
-}
 
 export function MetaEngagementToolbar(props: {
   platform: "all" | "facebook" | "instagram";
@@ -245,7 +233,7 @@ export function MetaEngagementTable({ rows }: { rows: MetaEngagementCommentRow[]
                   return (
                     <TableRow key={row.id}>
                       <TableCell className="text-muted-foreground whitespace-nowrap align-top text-xs">
-                        {formatWhen(row.createdAt)}
+                        {formatDateTimeKabul(row.createdAt)}
                       </TableCell>
                       <TableCell className="align-top">
                         <Badge variant="outline">

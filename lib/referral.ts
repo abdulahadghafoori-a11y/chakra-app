@@ -1,3 +1,5 @@
+import { formatDateTimeKabul } from "@/lib/kabul-time";
+
 /** Human-readable detail line for CTWA session pickers (name from contact, not stored JSON). */
 export function summarizeCtwaSessionLabel(s: {
   contactName: string | null;
@@ -15,18 +17,8 @@ export function summarizeCtwaSessionLabel(s: {
     const u = s.sourceUrl.length > 40 ? `${s.sourceUrl.slice(0, 40)}…` : s.sourceUrl;
     parts.push(u);
   }
-  try {
-    const d = new Date(s.sendTime);
-    if (!Number.isNaN(d.getTime())) {
-      parts.push(
-        new Intl.DateTimeFormat(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(d),
-      );
-    }
-  } catch {
-    parts.push(s.sendTime);
-  }
+  const labeled = formatDateTimeKabul(s.sendTime);
+  if (labeled !== "—") parts.push(labeled);
+  else parts.push(s.sendTime);
   return parts.join(" · ") || "CTWA session";
 }

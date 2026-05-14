@@ -31,6 +31,21 @@ export const contacts = pgTable(
   (t) => [uniqueIndex("contacts_phone_number_unique").on(t.phoneNumber)],
 );
 
+/**
+ * Singleton FX row: Afghan afghani equivalent to exactly 1.00 USD.
+ * Orders are entered on /orders/new in AFN; persists as USD rounded to cents.
+ */
+export const appFxUsdAfn = pgTable("app_fx_usd_afn", {
+  singletonId: text("singleton_id").primaryKey().default("singleton"),
+  afnPerOneUsd: numeric("afn_per_one_usd", { precision: 18, scale: 6 }).notNull(),
+  /** `manual`, `frankfurter`, `exchangerate_host`, etc. */
+  rateSource: text("rate_source").notNull().default("manual"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 /** Dashboard staff sign-in (/sales, /campaigns). Created via scripts/create-staff-user.mjs. */
 export const staffUsers = pgTable(
   "staff_users",
@@ -118,6 +133,15 @@ export const adInsightsDaily = pgTable(
       .default(0),
     /** Meta Ads Insights `actions` — purchase-related conversions (optimization signal). */
     metaPurchases: integer("meta_purchases").notNull().default(0),
+    /** Meta `frequency` — avg times each account saw this ad on that day (nullable until sync). */
+    frequency: numeric("frequency", { precision: 14, scale: 6 }),
+    /** Raw Meta `quality_ranking` for this ad/day (e.g. ABOVE_AVERAGE). */
+    qualityRanking: text("quality_ranking"),
+/** Not returned by standard ad-level insights `fields` (Graph #100 if requested). Column reserved for future API or manual backfill. */
+    firstTimeImpressionRatio: numeric("first_time_impression_ratio", {
+      precision: 16,
+      scale: 8,
+    }),
     currency: text("currency").notNull().default("USD"),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .defaultNow()
@@ -145,6 +169,7 @@ export const ctwaSessions = pgTable(
     contactId: uuid("contact_id")
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
+    /** Meta CTWA click id (opaque string; often base64url-like). Stored verbatim after trim at ingest. */
     ctwaClid: text("ctwa_clid").notNull(),
     wabaId: text("waba_id"),
     phoneNumberId: text("phone_number_id"),
@@ -381,6 +406,14 @@ export const orders = pgTable(
     ctwaSessionId: uuid("ctwa_session_id").references(() => ctwaSessions.id, {
       onDelete: "set null",
     }),
+    /**
+     * Staff override: attribute this order to a Meta campaign when there is no CTWA session.
+     * Rollups use this only when `ctwa_session_id` is null (CTWA path takes precedence if set).
+     */
+    manualMetaCampaignId: text("manual_meta_campaign_id").references(
+      () => metaCampaigns.id,
+      { onDelete: "set null" },
+    ),
     value: numeric("value", { precision: 14, scale: 4 }).notNull(),
     currency: text("currency").notNull().default("USD"),
     status: text("status").notNull(),
@@ -396,6 +429,21 @@ export const orders = pgTable(
     codFee: numeric("cod_fee", { precision: 14, scale: 4 })
       .notNull()
       .default("0"),
+    /** When shipping outside local area: Afghan province label (staff-selected). */
+    deliveryProvinceAfghanistan: text("delivery_province_afghanistan"),
+    /** Courier / postal tracking reference for provincial delivery. */
+    deliveryTrackingNumber: text("delivery_tracking_number"),
+    /** Snapshot of AFN per 1 USD used when converting line items to USD (audit trail). */
+    afnPerUsdSnapshot: numeric("afn_per_usd_snapshot", {
+      precision: 18,
+      scale: 6,
+    }),
+    /**
+     * Checkout / Meta wall clock from staff form (`datetime-local` as Asia/Kabul).
+     * Distinct from database insert time (`created_at`).
+     */
+    orderEventAt: timestamp("order_event_at", { withTimezone: true }).notNull(),
+    /** Exact time this row was inserted (server clock). */
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -407,6 +455,8 @@ export const orders = pgTable(
   (t) => [
     index("orders_contact_id_idx").on(t.contactId),
     index("orders_ctwa_session_id_idx").on(t.ctwaSessionId),
+    index("orders_manual_meta_campaign_id_idx").on(t.manualMetaCampaignId),
+    index("orders_order_event_at_idx").on(desc(t.orderEventAt)),
     index("orders_created_idx").on(desc(t.createdAt)),
   ],
 );

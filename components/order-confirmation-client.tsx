@@ -78,6 +78,12 @@ export function OrderConfirmationClient({ orderId, data }: Props) {
             Status <Badge variant="secondary">{order.status}</Badge>
             {" · "}
             {order.currency} {Number(order.value).toFixed(2)}
+            {order.valueAfn != null && order.valueAfn.trim() !== "" ? (
+              <>
+                {" · "}
+                AFN {Math.round(Number(order.valueAfn))} merchandise
+              </>
+            ) : null}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -95,8 +101,15 @@ export function OrderConfirmationClient({ orderId, data }: Props) {
                     {l.productName}{" "}
                     <span className="text-muted-foreground">× {l.quantity}</span>
                   </span>
-                  <span className="tabular-nums">
-                    {order.currency} {Number(l.lineValue).toFixed(2)}
+                  <span className="tabular-nums text-right">
+                    <span className="block">
+                      {order.currency} {Number(l.lineValue).toFixed(2)}
+                    </span>
+                    {l.lineValueAfn != null && l.lineValueAfn.trim() !== "" ? (
+                      <span className="text-muted-foreground block text-xs">
+                        AFN {Math.round(Number(l.lineValueAfn))}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}

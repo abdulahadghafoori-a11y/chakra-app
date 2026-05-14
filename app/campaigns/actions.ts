@@ -13,6 +13,7 @@ import {
   type BulkSyncStats,
   type InsightsSyncStats,
 } from "@/lib/meta-ads-sync";
+import { loadMetaCampaignTreeFromDb } from "@/lib/campaigns-rollups";
 
 export type CampaignsFullSyncResult = {
   structure: BulkSyncStats;
@@ -58,5 +59,10 @@ export async function syncMetaInsightsAction(days: number) {
   const stats = await syncAdInsightsDailyRange(sinceDay, untilDay);
   revalidatePath("/campaigns");
   return stats;
+}
+
+export async function loadMetaCampaignTreeAction() {
+  await assertStaffSession();
+  return loadMetaCampaignTreeFromDb();
 }
 

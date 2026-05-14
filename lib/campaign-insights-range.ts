@@ -3,6 +3,8 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 export const CAMPAIGN_RANGE_PRESETS = [
   { id: "today", label: "Today" },
   { id: "yesterday", label: "Yesterday" },
+  { id: "last_2", label: "Last 2 days" },
+  { id: "last_3", label: "Last 3 days" },
   { id: "last_7", label: "Last 7 days" },
   { id: "last_14", label: "Last 14 days" },
   { id: "last_30", label: "Last 30 days" },
@@ -22,10 +24,17 @@ export type CampaignInsightsBounds = {
 };
 
 export type ParsedCampaignRange = CampaignInsightsBounds & {
-  /** For the range `<Select>`: preset id, `custom`, or `days:N` (legacy). */
+  /** For URL sync: preset id, `custom`, or `days:N` (legacy). */
   selectValue: string;
   isCustom: boolean;
+  /** Short label for UI, e.g. "Last 7 days" or "Custom (2025-01-01 → 2025-01-07)". */
+  displayLabel: string;
 };
+
+function presetHumanLabel(id: CampaignRangePresetId): string {
+  const p = CAMPAIGN_RANGE_PRESETS.find((x) => x.id === id);
+  return p?.label ?? id;
+}
 
 function isoDateUTC(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -52,7 +61,7 @@ export function daysBetweenInclusive(sinceDay: string, untilDay: string): number
   return Math.floor((b - a) / 86_400_000) + 1;
 }
 
-function addUtcDaysToDateOnly(day: string, deltaDays: number): string {
+export function addUtcDaysToDateOnly(day: string, deltaDays: number): string {
   const [y, m, d] = day.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
   return isoDateUTC(dt);
@@ -104,18 +113,21 @@ function presetBounds(id: CampaignRangePresetId): CampaignInsightsBounds {
       const d = isoDateUTC(y);
       return boundsFromSinceUntilDays(d, d);
     }
+    case "last_2":
+    case "last_3":
     case "last_7":
     case "last_14":
     case "last_30":
     case "last_90": {
-      const span =
-        id === "last_7"
-          ? 7
-          : id === "last_14"
-            ? 14
-            : id === "last_30"
-              ? 30
-              : 90;
+      const spanById = {
+        last_2: 2,
+        last_3: 3,
+        last_7: 7,
+        last_14: 14,
+        last_30: 30,
+        last_90: 90,
+      } as const;
+      const span = spanById[id];
       const untilDay = isoDateUTC(now);
       const since = new Date(
         Date.UTC(
@@ -185,10 +197,12 @@ export function parseCampaignRangeSearchParams(
     fromRaw <= toRaw
   ) {
     const { from, until } = clampCustomToMaxSpan(fromRaw, toRaw);
+    const b = boundsFromSinceUntilDays(from, until);
     return {
-      ...boundsFromSinceUntilDays(from, until),
+      ...b,
       selectValue: CUSTOM_RANGE_SELECT_VALUE,
       isCustom: true,
+      displayLabel: `Custom (${from} → ${until})`,
     };
   }
 
@@ -199,6 +213,7 @@ export function parseCampaignRangeSearchParams(
       ...b,
       selectValue: rangeRaw,
       isCustom: false,
+      displayLabel: presetHumanLabel(rangeRaw),
     };
   }
 
@@ -210,14 +225,16 @@ export function parseCampaignRangeSearchParams(
       ...b,
       selectValue: `days:${d}`,
       isCustom: false,
+      displayLabel: legacyDaysSelectLabel(d),
     };
   }
 
-  const b = presetBounds("last_30");
+  const b = presetBounds("last_7");
   return {
     ...b,
-    selectValue: "last_30",
+    selectValue: "last_7",
     isCustom: false,
+    displayLabel: presetHumanLabel("last_7"),
   };
 }
 

@@ -39,14 +39,14 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     db
       .select({ c: count() })
       .from(orders)
-      .where(gte(orders.createdAt, since7d)),
+      .where(gte(orders.orderEventAt, since7d)),
     db
       .select({
         s: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
       })
       .from(orders)
       .where(
-        and(eq(orders.currency, APP_CURRENCY), gte(orders.createdAt, since7d)),
+        and(eq(orders.currency, APP_CURRENCY), gte(orders.orderEventAt, since7d)),
       ),
   ]);
 

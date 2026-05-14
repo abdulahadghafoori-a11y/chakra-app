@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { SalesSignOutButton } from "@/components/sales-sign-out-button";
 import { listSalesInboxConversations } from "@/lib/sales-inbox/data";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -190,7 +191,7 @@ export default async function SalesInboxPage({
                 rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap text-sm">
-                      {r.updatedAt.toISOString().slice(0, 16).replace("T", " ")}
+                      {formatDateTimeKabul(r.updatedAt)}
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate text-sm">
                       {r.contactPhone ?? r.waId}

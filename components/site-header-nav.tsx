@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { SalesSignOutButton } from "@/components/sales-sign-out-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ export function SiteHeaderNav({
   if (!authenticated) {
     return (
       <nav className="flex flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <ThemeToggle />
         <Link
           href="/login"
           className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
@@ -79,6 +81,7 @@ export function SiteHeaderNav({
         ))}
       </nav>
       <div className="flex shrink-0 items-center gap-2">
+        <ThemeToggle />
         <SalesSignOutButton />
       </div>
     </>

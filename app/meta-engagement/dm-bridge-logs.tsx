@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import {
   Table,
   TableBody,
@@ -18,19 +19,6 @@ export type MetaDmBridgeLogRow = {
   model: string | null;
   createdAt: string;
 };
-
-function formatWhen(iso: string) {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(d);
-  } catch {
-    return "—";
-  }
-}
 
 export function MetaDmBridgeLogsSection({
   rows,
@@ -82,7 +70,7 @@ export function MetaDmBridgeLogsSection({
               {rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="whitespace-nowrap text-sm">
-                    {formatWhen(r.createdAt)}
+                    {formatDateTimeKabul(r.createdAt)}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{r.channel}</Badge>

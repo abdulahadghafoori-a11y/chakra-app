@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
 import {
@@ -62,18 +62,31 @@ import { getPhonePresentation } from "@/lib/phone-display";
 import { isValidE164Input } from "@/lib/phone-e164";
 import {
   describeKabulLocalForMeta,
+  formatDateTimeKabul,
   getDefaultKabulDateTimeLocal,
 } from "@/lib/kabul-time";
 import {
-  APP_CURRENCY,
   type NewOrderFormInput,
   newOrderFormSchema,
   orderStatuses,
 } from "@/lib/validations/order";
+import type { PublicFxState } from "@/lib/app-fx-usd-afn";
+import {
+  afnAmountToUsd2,
+  catalogUsdToDefaultAfn,
+  roundAfnWhole,
+  roundUsd2,
+} from "@/lib/fx-afn-usd";
+import { OrderFormFxBar } from "@/components/order-form-fx-bar";
 import {
   orderConfirmStorageKey,
   type OrderConfirmClientPayload,
 } from "@/lib/order-confirmation-storage";
+import { MetaCampaignCombobox } from "@/components/meta-campaign-combobox";
+import { ProvinceSearchCombobox } from "@/components/province-search-combobox";
+import { DraftNumericInput } from "@/components/draft-numeric-input";
+import { AFGHANISTAN_PROVINCES_OUTSIDE_KABUL } from "@/lib/afghanistan-provinces";
+import type { MetaCampaignPickerOption } from "@/lib/campaigns-rollups";
 
 type FormValues = NewOrderFormInput;
 
@@ -83,40 +96,45 @@ type ContactPhase =
   | { status: "not_found" }
   | { status: "found"; contact: ContactLookup };
 
-function formatTs(iso: string) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
-
 function sessionTriggerLabel(s: CtwaSessionRow): string {
   const clid = s.ctwaClid?.slice(0, 12) ?? "—";
-  return `${clid}… · ${formatTs(s.sendTime)}`;
+  return `${clid}… · ${formatDateTimeKabul(s.sendTime)}`;
 }
 
-function defaultLine(products: ProductRow[]) {
+function defaultLine(products: ProductRow[], fxValid: boolean, afnPerUsd: number) {
   const p = products[0];
-  return {
-    productId: p?.id ?? "",
-    quantity: 1,
-    unitSalePrice: p ? Number(p.defaultSalePrice) : 1,
-  };
+  if (!p) {
+    return { productId: "", quantity: 1, unitSalePrice: 1 };
+  }
+  if (!fxValid) {
+    return { productId: p.id, quantity: 1, unitSalePrice: 1 };
+  }
+  const afn = catalogUsdToDefaultAfn(Number(p.defaultSalePrice), afnPerUsd);
+  const safe = Number.isFinite(afn) && afn > 0 ? afn : 1;
+  return { productId: p.id, quantity: 1, unitSalePrice: safe };
 }
 
 export function NewOrderForm({
   products,
+  metaCampaignOptions,
   initialPhone,
+  initialFx,
+  canStaffEditFx,
 }: {
   products: ProductRow[];
+  metaCampaignOptions: MetaCampaignPickerOption[];
   /** E.164 from `?phone=` (e.g. from Contacts) */
   initialPhone?: string;
+  /** Current AFN per 1 USD; required to convert AFN inputs to stored USD server-side */
+  initialFx: PublicFxState | null;
+  canStaffEditFx: boolean;
 }) {
   const router = useRouter();
+  const fxRateValid =
+    !!initialFx &&
+    Number.isFinite(initialFx.afnPerOneUsd) &&
+    initialFx.afnPerOneUsd > 0;
+  const fxRateNumber = fxRateValid ? initialFx.afnPerOneUsd : Number.NaN;
   const [sessions, setSessions] = useState<CtwaSessionRow[]>([]);
   const [loadingPhoneData, setLoadingPhoneData] = useState(false);
   const [contactPhase, setContactPhase] = useState<ContactPhase>({
@@ -135,10 +153,14 @@ export function NewOrderForm({
     defaultValues: {
       phone: initialPhone?.trim() ?? "",
       ctwaSessionId: "",
-      lines: [defaultLine(products)],
+      lines: [defaultLine(products, fxRateValid, initialFx?.afnPerOneUsd ?? 0)],
       status: "confirmed",
       capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
       deliveryCost: 0,
+      manualMetaCampaignId: "",
+      interProvinceAfghanistanDelivery: false,
+      deliveryProvinceAfghanistan: "",
+      deliveryTrackingNumber: "",
     },
   });
 
@@ -155,12 +177,55 @@ export function NewOrderForm({
   }, [initialPhone, setValue]);
 
   const phone = form.watch("phone");
-  const lines = form.watch("lines");
+  const phoneTrimmed = (phone ?? "").trim();
+  const phoneOk = isValidE164Input(phoneTrimmed);
+
+  const interProvince = form.watch("interProvinceAfghanistanDelivery");
+
+  const watchedLines =
+    useWatch({
+      control,
+      name: "lines",
+      defaultValue: form.getValues("lines"),
+    }) ?? [];
 
   const latestSession = useMemo(
     () => (sessions.length > 0 ? sessions[0] : undefined),
     [sessions],
   );
+
+  useEffect(() => {
+    if (!interProvince) {
+      setValue("deliveryProvinceAfghanistan", "");
+      setValue("deliveryTrackingNumber", "");
+      setValue("deliveryCost", 0);
+    }
+  }, [interProvince, setValue]);
+
+  useEffect(() => {
+    if (sessions.length > 0) {
+      setValue("manualMetaCampaignId", "");
+    }
+  }, [sessions.length, setValue]);
+
+  const hasNoCtwaSession =
+    contactPhase.status === "found" &&
+    !loadingPhoneData &&
+    sessions.length === 0 &&
+    phoneOk;
+
+  const metaCampaignChoicesAvailable = metaCampaignOptions.length > 0;
+  /** CTWA-less orders must attribute to a synced campaign whenever any exist */
+  const requireManualCampaignPick =
+    hasNoCtwaSession && metaCampaignChoicesAvailable;
+  const cannotCreateWithoutSyncedCampaigns =
+    hasNoCtwaSession && !metaCampaignChoicesAvailable;
+
+  useEffect(() => {
+    if (!requireManualCampaignPick) {
+      form.clearErrors("manualMetaCampaignId");
+    }
+  }, [requireManualCampaignPick, form]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -209,14 +274,28 @@ export function NewOrderForm({
     }
   }, [contactPhase, form]);
 
-  const orderTotal = useMemo(() => {
-    return (lines ?? []).reduce((sum, line) => {
+  const orderTotalAfn = useMemo(() => {
+    return (watchedLines ?? []).reduce((sum, line) => {
       const u = Number(line?.unitSalePrice);
       const q = Number.isFinite(line?.quantity) ? line.quantity : 1;
       if (!Number.isFinite(u) || u <= 0) return sum;
-      return sum + u * q;
+      return sum + roundAfnWhole(u) * q;
     }, 0);
-  }, [lines]);
+  }, [watchedLines]);
+
+  const orderTotalUsdRounded = useMemo(() => {
+    if (!fxRateValid) return Number.NaN;
+    let sum = 0;
+    for (const line of watchedLines ?? []) {
+      const uRaw = Number(line?.unitSalePrice);
+      const q = Number.isFinite(line?.quantity) ? line.quantity : 1;
+      if (!Number.isFinite(uRaw) || uRaw <= 0) continue;
+      const u = roundAfnWhole(uRaw);
+      const unitUsd = afnAmountToUsd2(u, fxRateNumber);
+      sum += roundUsd2(unitUsd * q);
+    }
+    return roundUsd2(sum);
+  }, [watchedLines, fxRateValid, fxRateNumber]);
 
   const reviewSummary = useMemo(() => {
     if (!reviewValues) return null;
@@ -225,30 +304,72 @@ export function NewOrderForm({
       : sessions[0];
     const lineRows = reviewValues.lines.map((line, i) => {
       const p = products.find((x) => x.id === line.productId);
-      const unit = line.unitSalePrice;
+      const unitAfn = roundAfnWhole(line.unitSalePrice);
       const qty = line.quantity;
+      let unitUsd = Number.NaN;
+      let lineUsd = Number.NaN;
+      if (fxRateValid) {
+        unitUsd = afnAmountToUsd2(unitAfn, fxRateNumber);
+        lineUsd = roundUsd2(unitUsd * qty);
+      }
       return {
         key: `${line.productId}-${i}`,
         lineNum: i + 1,
         name: p?.name ?? "Unknown product",
         sku: p?.sku ?? "—",
-        unit,
+        unitAfn,
         qty,
-        lineTotal: unit * qty,
+        unitUsd,
+        lineAfnTotal: unitAfn * qty,
+        lineUsd,
       };
     });
-    const total = lineRows.reduce((s, r) => s + r.lineTotal, 0);
+    const totalAfn = lineRows.reduce((s, r) => s + r.lineAfnTotal, 0);
+    const totalUsd = fxRateValid
+      ? roundUsd2(lineRows.reduce((s, r) => s + (Number.isFinite(r.lineUsd) ? r.lineUsd : 0), 0))
+      : Number.NaN;
+
+    let manualCampaignLine: string | null = null;
+    const mcId = reviewValues.manualMetaCampaignId.trim();
+    if (mcId) {
+      const c = metaCampaignOptions.find((x) => x.id === mcId);
+      manualCampaignLine = c?.name?.trim() ? c.name : mcId;
+    }
+
+    const interProv = reviewValues.interProvinceAfghanistanDelivery;
+    let deliveryUsd = Number.NaN;
+    const deliveryAfnSummary = reviewValues.deliveryCost;
+    if (interProv && fxRateValid) {
+      deliveryUsd = afnAmountToUsd2(deliveryAfnSummary, fxRateNumber);
+    }
+
     return {
       ctwaSession,
       lineRows,
-      total,
-      deliveryCost: reviewValues.deliveryCost,
+      totalAfn,
+      totalUsd,
+      deliveryAfnSummary,
+      deliveryUsd,
+      manualCampaignLine,
+      interProvinceShipment: interProv,
+      shipmentProvince: interProv
+        ? reviewValues.deliveryProvinceAfghanistan.trim()
+        : "",
+      shipmentTracking: interProv
+        ? reviewValues.deliveryTrackingNumber.trim()
+        : "",
     };
-  }, [reviewValues, products, sessions]);
+  }, [
+    reviewValues,
+    products,
+    sessions,
+    metaCampaignOptions,
+    fxRateValid,
+    fxRateNumber,
+  ]);
 
   const isDevReviewUi = process.env.NODE_ENV === "development";
 
-  const phoneOk = isValidE164Input((phone ?? "").trim());
   const contactPresentation =
     contactPhase.status === "found"
       ? getPhonePresentation(contactPhase.contact.phoneNumber)
@@ -257,7 +378,9 @@ export function NewOrderForm({
     pending ||
     loadingPhoneData ||
     !phoneOk ||
-    contactPhase.status !== "found";
+    contactPhase.status !== "found" ||
+    cannotCreateWithoutSyncedCampaigns ||
+    !fxRateValid;
 
   function runCreateOrder(values: FormValues) {
     startTransition(() => {
@@ -310,10 +433,14 @@ export function NewOrderForm({
         form.reset({
           phone: values.phone,
           ctwaSessionId: sessions[0]?.id ?? "",
-          lines: [defaultLine(products)],
+          lines: [defaultLine(products, fxRateValid, initialFx?.afnPerOneUsd ?? 0)],
           status: "confirmed",
           capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
           deliveryCost: 0,
+          manualMetaCampaignId: "",
+          interProvinceAfghanistanDelivery: false,
+          deliveryProvinceAfghanistan: "",
+          deliveryTrackingNumber: "",
         } satisfies FormValues);
       })();
     });
@@ -326,6 +453,20 @@ export function NewOrderForm({
       );
       return;
     }
+
+    if (requireManualCampaignPick && !values.manualMetaCampaignId.trim()) {
+      toast.error(
+        "Select a Meta campaign. This contact has no WhatsApp CTWA session yet.",
+      );
+      form.setError("manualMetaCampaignId", {
+        type: "manual",
+        message:
+          "Select a Meta campaign. This contact has no WhatsApp CTWA session.",
+      });
+      return;
+    }
+    form.clearErrors("manualMetaCampaignId");
+
     setReviewLoading(true);
     const preview = await previewOrderCapiPayload({ ...values });
     setReviewLoading(false);
@@ -351,7 +492,18 @@ export function NewOrderForm({
           before the order is created.
         </CardDescription>
       </CardHeader>
-      <CardContent className="px-4 pb-6 sm:px-6">
+      <CardContent className="space-y-4 px-4 pb-6 sm:px-6">
+        {!fxRateValid ? (
+          <p className="text-destructive border-destructive/30 bg-destructive/10 rounded-lg border px-3 py-2 text-sm leading-relaxed">
+            Set the USD→AFN rate (staff) or apply the{" "}
+            <code className="text-xs">app_fx_usd_afn</code> migration so we can convert
+            your Afghanis into stored USD before creating an order.
+          </p>
+        ) : null}
+        <OrderFormFxBar
+          initialFx={initialFx}
+          canStaffEditFx={canStaffEditFx}
+        />
         <Form {...form}>
           <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
             {/* Attribution: compact phone + flexible session */}
@@ -414,6 +566,54 @@ export function NewOrderForm({
                   )}
                 />
               </div>
+              {hasNoCtwaSession ? (
+                <div className="bg-muted/20 space-y-3 rounded-lg border border-dashed p-3">
+                  <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    Meta campaign (required · no CTWA session)
+                  </p>
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    This contact has <strong className="text-foreground font-medium">no</strong>{" "}
+                    WhatsApp CTWA session. You must attribute this order by choosing a synced
+                    Meta campaign so reporting under{" "}
+                    <strong className="text-foreground font-medium">Campaigns</strong> stays accurate.
+                  </p>
+                  {metaCampaignOptions.length === 0 ? (
+                    <p className="text-muted-foreground text-xs">
+                      No campaigns in the database. Open{" "}
+                      <a
+                        className="text-foreground underline underline-offset-2"
+                        href="/campaigns"
+                      >
+                        Campaigns
+                      </a>{" "}
+                      and run <strong>Sync from Meta</strong> first.
+                    </p>
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name="manualMetaCampaignId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">
+                            Meta campaign{" "}
+                            <span className="text-destructive">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <MetaCampaignCombobox
+                              required
+                              options={metaCampaignOptions}
+                              value={field.value}
+                              onChange={field.onChange}
+                              id={field.name}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              ) : null}
               <p className="text-muted-foreground text-xs">
                 Looks up the saved contact and CTWA sessions for this number.
               </p>
@@ -456,7 +656,7 @@ export function NewOrderForm({
                     <div className="min-w-0 sm:col-span-2">
                       <dt className="text-muted-foreground">In system since</dt>
                       <dd>
-                        {formatTs(contactPhase.contact.createTime)}
+                        {formatDateTimeKabul(contactPhase.contact.createTime)}
                       </dd>
                     </div>
                   </dl>
@@ -478,7 +678,9 @@ export function NewOrderForm({
                   size="sm"
                   className="h-8"
                   disabled={!products.length}
-                  onClick={() => append(defaultLine(products))}
+                  onClick={() =>
+                    append(defaultLine(products, fxRateValid, initialFx?.afnPerOneUsd ?? 0))
+                  }
                 >
                   <PlusIcon className="mr-1 size-3.5" />
                   Add product
@@ -487,15 +689,27 @@ export function NewOrderForm({
 
               <div className="space-y-4">
                 {fields.map((fieldRow, index) => {
-                  const lineProductId = lines?.[index]?.productId;
+                  const lineProductId = watchedLines?.[index]?.productId;
                   const lineProduct = products.find((p) => p.id === lineProductId);
-                  const lineUnit = Number(lines?.[index]?.unitSalePrice);
-                  const lineQty = Number.isFinite(lines?.[index]?.quantity)
-                    ? lines[index].quantity
+                  const lineUnit = Number(watchedLines?.[index]?.unitSalePrice);
+                  const lineQty = Number.isFinite(watchedLines?.[index]?.quantity)
+                    ? watchedLines[index].quantity
                     : 1;
-                  const lineSum =
+                  const lineUsdApprox =
+                    fxRateValid &&
+                    Number.isFinite(lineUnit) &&
+                    lineUnit > 0
+                      ? roundUsd2(
+                          afnAmountToUsd2(
+                            roundAfnWhole(lineUnit),
+                            fxRateNumber,
+                          ) * lineQty,
+                        )
+                      : Number.NaN;
+
+                  const lineSumAfn =
                     Number.isFinite(lineUnit) && lineUnit > 0
-                      ? lineUnit * lineQty
+                      ? roundAfnWhole(lineUnit) * lineQty
                       : 0;
 
                   return (
@@ -530,11 +744,17 @@ export function NewOrderForm({
                               onValueChange={(v) => {
                                 field.onChange(v);
                                 const p = products.find((x) => x.id === v);
-                                if (p) {
+                                if (p && fxRateValid) {
+                                  const afn = catalogUsdToDefaultAfn(
+                                    Number(p.defaultSalePrice),
+                                    fxRateNumber,
+                                  );
                                   setValue(
                                     `lines.${index}.unitSalePrice`,
-                                    Number(p.defaultSalePrice),
+                                    Number.isFinite(afn) && afn > 0 ? afn : 1,
                                   );
+                                } else if (p) {
+                                  setValue(`lines.${index}.unitSalePrice`, 1);
                                 }
                               }}
                               value={field.value}
@@ -561,6 +781,9 @@ export function NewOrderForm({
                                     <span className="text-muted-foreground">
                                       {" "}
                                       · USD {p.defaultSalePrice}
+                                    {fxRateValid
+                                      ? ` · ≈ ${String(catalogUsdToDefaultAfn(Number(p.defaultSalePrice), fxRateNumber))} AFN`
+                                      : ""}
                                     </span>
                                   </SelectItem>
                                 ))}
@@ -570,28 +793,22 @@ export function NewOrderForm({
                           </FormItem>
                         )}
                       />
-                      <div className="flex flex-wrap items-end gap-3">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-4">
                         <FormField
                           control={form.control}
                           name={`lines.${index}.unitSalePrice`}
                           render={({ field }) => (
-                            <FormItem className="w-[7.5rem] shrink-0">
-                              <FormLabel className="text-xs">Unit (USD)</FormLabel>
+                            <FormItem className="min-w-0 flex-1 sm:max-w-[10rem]">
+                              <FormLabel className="text-xs">Unit (AFN)</FormLabel>
                               <FormControl>
-                                <Input
-                                  className="h-9 font-mono text-sm tabular-nums"
-                                  min={0}
-                                  step="0.01"
-                                  type="number"
-                                  value={field.value}
-                                  onBlur={field.onBlur}
-                                  onChange={(e) =>
-                                    field.onChange(
-                                      Number.parseFloat(e.target.value || "0"),
-                                    )
-                                  }
-                                  name={field.name}
+                                <DraftNumericInput
                                   ref={field.ref}
+                                  name={field.name}
+                                  variant="unitAfn"
+                                  className="focus-visible:ring-ring h-12 min-h-12 font-mono text-base tabular-nums sm:h-9 sm:min-h-0 sm:text-sm"
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                  onBlur={field.onBlur}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -602,37 +819,37 @@ export function NewOrderForm({
                           control={form.control}
                           name={`lines.${index}.quantity`}
                           render={({ field }) => (
-                            <FormItem className="w-[5.5rem] shrink-0">
+                            <FormItem className="w-full min-w-[6.5rem] sm:w-auto sm:flex-none">
                               <FormLabel className="text-xs">Qty</FormLabel>
                               <FormControl>
-                                <Input
-                                  className="h-9 font-mono text-sm tabular-nums"
-                                  min={1}
-                                  step={1}
-                                  type="number"
-                                  value={field.value}
-                                  onBlur={field.onBlur}
-                                  onChange={(e) =>
-                                    field.onChange(
-                                      Number.parseInt(
-                                        e.target.value || "1",
-                                        10,
-                                      ) || 1,
-                                    )
-                                  }
-                                  name={field.name}
+                                <DraftNumericInput
                                   ref={field.ref}
+                                  name={field.name}
+                                  variant="qty"
+                                  className="focus-visible:ring-ring h-12 min-h-12 font-mono text-base tabular-nums sm:h-9 sm:min-h-0 sm:w-[6.25rem] sm:text-sm"
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                  onBlur={field.onBlur}
                                 />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
-                        <div className="min-w-[8rem] flex-1 pb-2 pl-1">
-                          <p className="text-muted-foreground text-xs">Line total</p>
-                          <p className="text-base font-semibold tabular-nums">
-                            {lineProduct ? `USD ${lineSum.toFixed(2)}` : "—"}
+                        <div className="min-h-[52px] w-full shrink-0 border-t pt-2 sm:min-h-0 sm:w-auto sm:min-w-[7.5rem] sm:border-l sm:border-t-0 sm:pb-2 sm:pl-4 md:pb-3">
+                          <p className="text-muted-foreground text-xs">
+                            Line total
                           </p>
+                          <div className="space-y-0.5">
+                            <p className="text-lg font-semibold tabular-nums sm:text-base">
+                              {lineProduct ? `AFN ${lineSumAfn}` : "—"}
+                            </p>
+                            {lineProduct && fxRateValid ? (
+                              <p className="text-muted-foreground text-[11px] tabular-nums">
+                                ≈ USD {lineUsdApprox.toFixed(2)} stored
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -642,13 +859,22 @@ export function NewOrderForm({
 
               <div className="flex flex-wrap items-end justify-between gap-3 border-t pt-3">
                 <p className="text-muted-foreground text-xs">
-                  Unit price defaults from the product; override for discounts.
+                  Whole-number Afghanis only; merchandise is stored as USD (two decimals) for Meta and accounting.
                 </p>
                 <div className="text-right">
-                  <p className="text-muted-foreground text-xs">Order total</p>
-                  <p className="text-lg font-semibold tabular-nums">
-                    {APP_CURRENCY} {orderTotal.toFixed(2)}
+                  <p className="text-muted-foreground text-xs">Merchandise total</p>
+                  <p className="text-xl font-semibold tabular-nums tracking-tight sm:text-lg">
+                    AFN {orderTotalAfn}
                   </p>
+                  {fxRateValid ? (
+                    <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
+                      ≈ USD {orderTotalUsdRounded.toFixed(2)} for Meta / database
+                    </p>
+                  ) : (
+                    <p className="text-destructive mt-1 text-[11px]">
+                      Set FX rate above to preview USD amounts.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -656,44 +882,134 @@ export function NewOrderForm({
             <Separator />
 
             <div className="space-y-4">
-              <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                Delivery cost
+              <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Shipping
               </p>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                Optional. Saved as <code className="text-xs">delivery_cost</code>{" "}
-                on the order. Counts toward campaign operational cost when the
-                order is paid and attributed. There is no other way to set this
-                in the app after the order exists.
+                Default fulfillment is treated as{" "}
+                <strong className="text-foreground font-medium">
+                  local delivery (Kabul)
+                </strong>
+                . Enable <strong className="text-foreground font-medium">outside Kabul</strong>{" "}
+                to capture destination province, courier fee in AFN (saved as USD), and optional
+                tracking. There is{" "}
+                <strong className="text-foreground font-medium">no</strong> delivery fee stored
+                for Kabul-local orders here.
               </p>
+              {!interProvince ? (
+                <div className="bg-muted/40 text-muted-foreground rounded-lg border px-3 py-2 text-xs leading-relaxed">
+                  <span className="text-foreground font-medium">
+                    Delivering locally in Kabul
+                  </span>{" "}
+                  — courier cost is tracked only when you ship to another province.
+                </div>
+              ) : null}
               <FormField
                 control={form.control}
-                name="deliveryCost"
+                name="interProvinceAfghanistanDelivery"
                 render={({ field }) => (
-                  <FormItem className="max-w-xs">
-                    <FormLabel className="text-xs">
-                      Delivery ({APP_CURRENCY})
-                    </FormLabel>
+                  <FormItem className="flex flex-row items-start gap-3 rounded-lg border bg-muted/20 p-3">
                     <FormControl>
-                      <Input
-                        className="h-9 font-mono text-sm tabular-nums"
-                        min={0}
-                        step="0.01"
-                        type="number"
-                        value={field.value}
-                        onBlur={field.onBlur}
-                        onChange={(e) =>
-                          field.onChange(
-                            Number.parseFloat(e.target.value || "0"),
-                          )
-                        }
-                        name={field.name}
-                        ref={field.ref}
+                      <input
+                        id="outside-kabul-delivery"
+                        type="checkbox"
+                        className="border-input mt-1 size-[1.125rem] shrink-0 rounded border ring-offset-background accent-primary disabled:opacity-50"
+                        checked={field.value}
+                        onChange={(e) => field.onChange(e.target.checked)}
                       />
                     </FormControl>
-                    <FormMessage />
+                    <div className="min-w-0 space-y-1 leading-snug">
+                      <FormLabel
+                        htmlFor="outside-kabul-delivery"
+                        className="cursor-pointer font-normal leading-snug"
+                      >
+                        Ship to another province{" "}
+                        <span className="text-muted-foreground">(outside Kabul)</span>
+                      </FormLabel>
+                      <p className="text-muted-foreground text-xs">
+                        Choose province, enter courier fee, and optionally add logistics
+                        tracking.
+                      </p>
+                    </div>
                   </FormItem>
                 )}
               />
+              {interProvince ? (
+                <div className="bg-muted/15 space-y-4 rounded-lg border p-4">
+                  <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+                    <FormField
+                      control={form.control}
+                      name="deliveryProvinceAfghanistan"
+                      render={({ field }) => (
+                        <FormItem className="min-w-0">
+                          <FormLabel className="text-xs">
+                            Province <span className="text-destructive">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <ProvinceSearchCombobox
+                              provinces={AFGHANISTAN_PROVINCES_OUTSIDE_KABUL}
+                              value={field.value}
+                              onChange={field.onChange}
+                              id={field.name}
+                              placeholder="Search province…"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="deliveryTrackingNumber"
+                      render={({ field }) => (
+                        <FormItem className="min-w-0">
+                          <FormLabel className="text-xs">
+                            Tracking number{" "}
+                            <span className="text-muted-foreground font-normal">
+                              (optional)
+                            </span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              className="h-11 min-h-11 font-mono text-base tabular-nums sm:h-9 sm:min-h-0 sm:text-sm"
+                              placeholder="AWB / reference"
+                              autoComplete="off"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="deliveryCost"
+                    render={({ field }) => (
+                      <FormItem className="max-w-xs">
+                        <FormLabel className="text-xs">Courier fee (AFN)</FormLabel>
+                        <p className="text-muted-foreground text-[11px] leading-relaxed">
+                          Whole Afghanis only; we save{" "}
+                          <code className="text-[11px]">delivery_cost</code> in USD (two
+                          decimals). Not sent to Meta CAPI. Not used for Kabul-local orders.
+                        </p>
+                        <FormControl>
+                          <DraftNumericInput
+                            ref={field.ref}
+                            name={field.name}
+                            variant="courierAfn"
+                            className="h-11 min-h-11 font-mono text-base tabular-nums sm:h-9 sm:min-h-0 sm:text-sm"
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            onBlur={field.onBlur}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <Separator />
@@ -892,7 +1208,7 @@ export function NewOrderForm({
                             <dt className="text-muted-foreground">
                               In system since
                             </dt>
-                            <dd>{formatTs(contactPhase.contact.createTime)}</dd>
+                            <dd>{formatDateTimeKabul(contactPhase.contact.createTime)}</dd>
                           </div>
                         </dl>
                       </div>
@@ -942,7 +1258,8 @@ export function NewOrderForm({
                       Products
                     </p>
                     {isDevReviewUi ? (
-                      <Table>
+                      <>
+                        <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead className="w-10">#</TableHead>
@@ -950,9 +1267,9 @@ export function NewOrderForm({
                               Product
                             </TableHead>
                             <TableHead>SKU</TableHead>
-                            <TableHead className="text-right">Unit</TableHead>
+                            <TableHead className="text-right">Unit (AFN)</TableHead>
                             <TableHead className="text-right">Qty</TableHead>
-                            <TableHead className="text-right">Line total</TableHead>
+                            <TableHead className="text-right">Stored USD (line)</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -968,13 +1285,15 @@ export function NewOrderForm({
                                 {row.sku}
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
-                                USD {row.unit.toFixed(2)}
+                                {row.unitAfn}
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
                                 {row.qty}
                               </TableCell>
                               <TableCell className="text-right font-medium tabular-nums">
-                                USD {row.lineTotal.toFixed(2)}
+                                {Number.isFinite(row.lineUsd)
+                                  ? `USD ${row.lineUsd.toFixed(2)}`
+                                  : "—"}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -983,17 +1302,28 @@ export function NewOrderForm({
                           <TableRow>
                             <TableCell
                               colSpan={5}
-                              className="text-right text-muted-foreground"
+                              className="text-right text-muted-foreground text-xs uppercase tracking-wide"
                             >
-                              Order total
+                              Merchandise (stored USD · CAPI value)
                             </TableCell>
                             <TableCell className="text-right text-base font-semibold tabular-nums">
-                              USD {reviewSummary.total.toFixed(2)}
+                              {Number.isFinite(reviewSummary.totalUsd)
+                                ? `USD ${reviewSummary.totalUsd.toFixed(2)}`
+                                : "—"}
                             </TableCell>
                           </TableRow>
                         </TableFooter>
                       </Table>
+                      <p className="text-muted-foreground mt-2 text-[11px] leading-relaxed">
+                        Whole AFN per line. Merchandise subtotal (AFN):{" "}
+                        <span className="text-foreground font-medium tabular-nums">
+                          {reviewSummary.totalAfn}
+                        </span>
+                        .
+                      </p>
+                      </>
                     ) : (
+                      <>
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -1001,7 +1331,7 @@ export function NewOrderForm({
                               Product
                             </TableHead>
                             <TableHead className="text-right">Qty</TableHead>
-                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead className="text-right">Stored USD (line)</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1014,7 +1344,9 @@ export function NewOrderForm({
                                 {row.qty}
                               </TableCell>
                               <TableCell className="text-right font-medium tabular-nums">
-                                USD {row.lineTotal.toFixed(2)}
+                                {Number.isFinite(row.lineUsd)
+                                  ? `USD ${row.lineUsd.toFixed(2)}`
+                                  : "—"}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1023,26 +1355,83 @@ export function NewOrderForm({
                           <TableRow>
                             <TableCell
                               colSpan={2}
-                              className="text-right text-muted-foreground"
+                              className="text-right text-muted-foreground text-xs uppercase tracking-wide"
                             >
-                              Order total
+                              Merchandise (USD · Meta)
                             </TableCell>
                             <TableCell className="text-right text-base font-semibold tabular-nums">
-                              USD {reviewSummary.total.toFixed(2)}
+                              {Number.isFinite(reviewSummary.totalUsd)
+                                ? `USD ${reviewSummary.totalUsd.toFixed(2)}`
+                                : "—"}
                             </TableCell>
                           </TableRow>
                         </TableFooter>
                       </Table>
+                      <p className="text-muted-foreground mt-2 text-[11px] leading-relaxed">
+                        Merchandise subtotal (AFN):{" "}
+                        <span className="text-foreground font-medium tabular-nums">
+                          {reviewSummary.totalAfn}
+                        </span>
+                      </p>
+                      </>
                     )}
-                    <div className="bg-muted/40 mt-3 rounded-lg border px-3 py-2 text-xs">
-                      <p className="text-muted-foreground font-medium tracking-wide uppercase">
-                        Delivery cost (saved on order · not in CAPI)
-                      </p>
-                      <p className="mt-2 tabular-nums font-medium">
-                        {APP_CURRENCY}{" "}
-                        {reviewSummary.deliveryCost.toFixed(2)}
-                      </p>
-                    </div>
+                    {reviewSummary.interProvinceShipment ? (
+                      <div className="bg-muted/40 mt-3 space-y-2 rounded-lg border px-3 py-2 text-xs">
+                        <p className="text-muted-foreground font-medium tracking-wide uppercase">
+                          Outside Kabul (province delivery)
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Province: </span>
+                          <span className="font-medium">
+                            {reviewSummary.shipmentProvince || "—"}
+                          </span>
+                        </p>
+                        <p className="break-all font-mono tabular-nums">
+                          <span className="text-muted-foreground font-sans">
+                            Tracking:{" "}
+                          </span>
+                          {reviewSummary.shipmentTracking || "—"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground font-sans font-medium tracking-wide uppercase">
+                            Courier fee (saved · not CAPI):{" "}
+                          </span>
+                          <span className="tabular-nums font-medium">
+                            AFN {reviewSummary.deliveryAfnSummary}
+                            {Number.isFinite(reviewSummary.deliveryUsd) ? (
+                              <span className="text-muted-foreground font-normal">
+                                {" "}
+                                → USD {reviewSummary.deliveryUsd.toFixed(2)}
+                              </span>
+                            ) : null}
+                          </span>
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-muted/40 mt-3 rounded-lg border px-3 py-2 text-xs">
+                        <p className="text-muted-foreground font-medium tracking-wide uppercase">
+                          Delivery
+                        </p>
+                        <p className="mt-2 text-muted-foreground leading-relaxed">
+                          <span className="text-foreground font-medium">
+                            Local (Kabul)
+                          </span>{" "}
+                          — courier fee applies only outside Kabul. Nothing stored under{" "}
+                          <code className="text-[11px]">delivery_cost</code> for this
+                          preference.
+                        </p>
+                      </div>
+                    )}
+                    {reviewSummary.manualCampaignLine ? (
+                      <div className="bg-muted/40 mt-3 rounded-lg border px-3 py-2 text-xs">
+                        <p className="text-muted-foreground font-medium tracking-wide uppercase">
+                          Manual Meta campaign
+                        </p>
+                        <p className="mt-2 font-medium leading-relaxed">
+                          {reviewSummary.manualCampaignLine}
+                        </p>
+                      </div>
+                    ) : null}
                     <p className="text-muted-foreground mt-2 text-xs">
                       Payment status{" "}
                       <span className="font-medium text-foreground capitalize">
