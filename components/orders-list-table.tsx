@@ -32,16 +32,24 @@ import {
 } from "@/lib/orders-list";
 import { cn } from "@/lib/utils";
 
+function productHref(coreMode: boolean, productId: string) {
+  return coreMode
+    ? `/products#product-${productId}`
+    : `/products/${encodeURIComponent(productId)}/agent`;
+}
+
 type Props = {
   rows: OrderTableRow[];
   itemsByOrder: Map<string, OrderLineSummary[]>;
   filterContactId?: string;
+  coreMode: boolean;
 };
 
 export function OrdersListTable({
   rows,
   itemsByOrder,
   filterContactId,
+  coreMode,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -131,12 +139,6 @@ export function OrdersListTable({
               ) : (
                 rows.map((r, rowIndex) => {
                   const items = itemsByOrder.get(r.id) ?? [];
-                  const productSummary =
-                    items.length === 0
-                      ? ""
-                      : items
-                          .map((it) => `${it.productName} × ${it.quantity}`)
-                          .join(", ");
                   const totalPrimary = `${r.currency} ${formatOrderUsdTable(r.value)}`;
                   const totalTitle =
                     r.valueAfn != null && r.valueAfn.trim() !== ""
@@ -166,17 +168,25 @@ export function OrdersListTable({
                           {r.phone}
                         </Link>
                       </TableCell>
-                      <TableCell className="max-w-[12rem] min-w-0 align-middle px-2 text-center text-sm">
+                      <TableCell className="max-w-[13rem] min-w-0 align-middle px-2 text-center text-sm">
                         {items.length === 0 ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
-                          <Link
-                            href={`/orders/${encodeURIComponent(r.id)}`}
-                            className="text-foreground block truncate hover:text-primary hover:underline"
-                            title={productSummary}
-                          >
-                            {productSummary}
-                          </Link>
+                          <div className="flex min-w-0 flex-col items-center gap-1">
+                            {items.map((it) => {
+                              const label = `${it.productName} × ${it.quantity}`;
+                              return (
+                                <Link
+                                  key={`${it.orderId}-${it.productId}`}
+                                  href={productHref(coreMode, it.productId)}
+                                  className="text-primary block w-full max-w-full truncate underline-offset-2 hover:underline"
+                                  title={label}
+                                >
+                                  {label}
+                                </Link>
+                              );
+                            })}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell className="max-w-[7.5rem] min-w-0 align-middle text-center text-xs tabular-nums">

@@ -5,7 +5,8 @@ import { z } from "zod";
 
 import { fetchAfnPerOneUsdFromPublicApis } from "@/lib/fetch-afn-per-usd";
 import { upsertAppFxAfnPerUsd } from "@/lib/app-fx-usd-afn";
-import { requireStaffSession } from "@/lib/staff-auth/guard";
+
+/** Allowed without staff login because `/orders/new` is public; rate is global app config. */
 
 const manualRateSchema = z.object({
   afnPerOneUsd: z
@@ -18,15 +19,6 @@ const manualRateSchema = z.object({
 export async function saveManualAfnPerUsd(
   raw: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    await requireStaffSession();
-  } catch {
-    return {
-      ok: false,
-      error:
-        "Sign in as staff (/sales) to change the USD→AFN rate on this machine.",
-    };
-  }
   const parsed = manualRateSchema.safeParse(raw);
   if (!parsed.success) {
     return {
@@ -47,15 +39,6 @@ export async function saveManualAfnPerUsd(
 export async function syncAfnPerUsdFromApi(): Promise<
   { ok: true; afnPerOneUsd: number; source: string } | { ok: false; error: string }
 > {
-  try {
-    await requireStaffSession();
-  } catch {
-    return {
-      ok: false,
-      error:
-        "Sign in as staff (/sales) to sync the exchange rate from the internet.",
-    };
-  }
   try {
     const { afnPerOneUsd, source } = await fetchAfnPerOneUsdFromPublicApis();
     const now = new Date();

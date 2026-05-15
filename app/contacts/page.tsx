@@ -121,13 +121,23 @@ export default async function ContactsPage({
                       <TableCell className="text-muted-foreground align-middle text-center text-xs tabular-nums">
                         {rankOffset + rowIndex + 1}
                       </TableCell>
-                      <TableCell className="max-w-[14rem] align-middle text-center">
-                        <div className="break-words font-medium leading-snug">
+                      <TableCell className="max-w-[14rem] min-w-0 align-middle text-center">
+                        <div
+                          className="line-clamp-2 break-words font-medium leading-snug"
+                          title={r.name?.trim() || undefined}
+                        >
                           {r.name?.trim() || (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </div>
-                        <div className="text-muted-foreground mt-1 text-xs leading-snug break-words">
+                        <div
+                          className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-snug break-words"
+                          title={
+                            r.countryName?.trim() ||
+                            r.countryCode?.trim() ||
+                            undefined
+                          }
+                        >
                           {r.countryName ?? r.countryCode ?? "—"}
                         </div>
                       </TableCell>

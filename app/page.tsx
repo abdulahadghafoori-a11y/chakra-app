@@ -205,6 +205,7 @@ export default async function HomePage({
           rows={orderRows}
           itemsByOrder={itemsByOrder}
           filterContactId={filterContactId}
+          coreMode={coreMode}
         />
       </div>
     </div>

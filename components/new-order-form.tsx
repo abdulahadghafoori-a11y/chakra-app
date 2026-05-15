@@ -480,7 +480,7 @@ export function NewOrderForm({
   }
 
   return (
-    <Card className="mx-auto w-full max-w-xl shadow-sm">
+    <Card className="mx-auto w-full min-w-0 max-w-xl shadow-sm">
       <CardHeader className="space-y-1 px-4 pb-4 pt-5 sm:px-6 sm:pt-6">
         <CardTitle className="text-lg sm:text-xl">New order</CardTitle>
         <CardDescription className="text-pretty leading-relaxed">
@@ -492,10 +492,10 @@ export function NewOrderForm({
           before the order is created.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 px-4 pb-6 sm:px-6">
+      <CardContent className="min-w-0 space-y-4 px-4 pb-6 sm:px-6">
         {!fxRateValid ? (
           <p className="text-destructive border-destructive/30 bg-destructive/10 rounded-lg border px-3 py-2 text-sm leading-relaxed">
-            Set the USD→AFN rate (staff) or apply the{" "}
+            Set the USD→AFN rate above or apply the{" "}
             <code className="text-xs">app_fx_usd_afn</code> migration so we can convert
             your Afghanis into stored USD before creating an order.
           </p>
@@ -1018,13 +1018,13 @@ export function NewOrderForm({
               <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Order details
               </p>
-              <div className="flex max-w-full flex-col gap-4 sm:max-w-none sm:flex-row sm:flex-wrap sm:items-end">
-                <div className="max-w-[12rem]">
+              <div className="flex min-w-0 max-w-full flex-col gap-4 sm:max-w-none sm:flex-row sm:flex-wrap sm:items-end">
+                <div className="min-w-0 w-full max-w-full sm:w-auto sm:max-w-[12rem]">
                   <FormField
                     control={form.control}
                     name="status"
                     render={({ field }) => (
-                      <FormItem>
+                      <FormItem className="min-w-0">
                         <FormLabel>Status</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
@@ -1045,21 +1045,21 @@ export function NewOrderForm({
                     )}
                   />
                 </div>
-                <div className="min-w-0 max-w-full sm:min-w-[11rem] sm:max-w-[20rem] sm:flex-1">
+                <div className="min-w-0 w-full max-w-full sm:min-w-[11rem] sm:max-w-[20rem] sm:flex-1">
                   <FormField
                     control={form.control}
                     name="capiEventTimeKabul"
                     render={({ field }) => (
-                      <FormItem>
+                      <FormItem className="min-w-0">
                         <FormLabel>
                           Event time{" "}
                           <span className="text-muted-foreground font-normal">
                             (Kabul · UTC+4:30)
                           </span>
                         </FormLabel>
-                        <FormControl>
+                        <FormControl className="min-w-0 w-full">
                           <Input
-                            className="h-11 min-h-11 w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:h-9 sm:min-h-9 sm:text-sm"
+                            className="box-border h-11 min-h-11 w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:h-9 sm:min-h-9 sm:text-sm"
                             type="datetime-local"
                             step={60}
                             name={field.name}

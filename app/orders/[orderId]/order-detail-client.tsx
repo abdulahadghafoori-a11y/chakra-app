@@ -325,8 +325,8 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
+    <div className="min-w-0 space-y-6">
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>Fulfillment status</CardTitle>
           <CardDescription>
@@ -341,8 +341,8 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             below if Events Manager missed the event.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="flex flex-col gap-1.5">
+        <CardContent className="flex min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="flex min-w-0 w-full shrink-0 flex-col gap-1.5 sm:w-auto">
             <Label htmlFor="order-status-select" className="text-xs">
               Status
             </Label>
@@ -365,18 +365,18 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             </Select>
           </div>
           {needsCapiEventTime ? (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 w-full max-w-full flex-col gap-1.5 sm:w-auto sm:max-w-[min(100%,14rem)]">
               <Label htmlFor="order-capi-time" className="text-xs">
                 Meta Purchase event time (Kabul)
               </Label>
               <Input
                 id="order-capi-time"
                 type="datetime-local"
-                className="w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:w-auto sm:max-w-[12rem] sm:text-sm"
+                className="box-border h-10 w-full min-w-0 max-w-full font-mono text-base tabular-nums sm:h-9 sm:text-sm"
                 value={capiEventTimeKabul}
                 onChange={(e) => setCapiEventTimeKabul(e.target.value)}
               />
-              <p className="text-muted-foreground max-w-md text-xs">
+              <p className="text-muted-foreground min-w-0 max-w-full text-xs">
                 Used as Meta <code className="text-[11px]">event_time</code> for
                 this Purchase only.
               </p>
@@ -392,7 +392,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>Meta Conversions API</CardTitle>
           <CardDescription>
@@ -405,7 +405,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             OK while nothing useful appears in reporting.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="min-w-0 space-y-4">
           <div className="text-sm">
             <p className="text-muted-foreground text-xs font-medium uppercase">
               Primary send (from create or first Confirm/Paid)
@@ -430,21 +430,21 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
           </div>
 
           {capiEligibleNow ? (
-            <div className="border-muted space-y-3 rounded-lg border bg-muted/15 p-4">
+            <div className="border-muted min-w-0 space-y-3 rounded-lg border bg-muted/15 p-4">
               <p className="text-muted-foreground text-xs leading-relaxed">
                 <strong className="text-foreground">Resend</strong> posts another server{" "}
                 Purchase/TestEvent with a <strong className="text-foreground">new</strong>{" "}
                 <code className="text-[11px]">event_id</code> so Meta does not dedupe it
                 against the first attempt. Merchandise totals come from current line items.
               </p>
-              <div className="flex flex-col gap-1.5">
+              <div className="flex min-w-0 w-full max-w-full flex-col gap-1.5 sm:w-auto sm:max-w-[min(100%,14rem)]">
                 <Label htmlFor="resend-capi-time" className="text-xs">
                   Event time for this resend (Kabul)
                 </Label>
                 <Input
                   id="resend-capi-time"
                   type="datetime-local"
-                  className="w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:w-auto sm:max-w-[12rem] sm:text-sm"
+                  className="box-border h-10 w-full min-w-0 max-w-full font-mono text-base tabular-nums sm:h-9 sm:text-sm"
                   value={resendCapiEventTimeKabul}
                   onChange={(e) => setResendCapiEventTimeKabul(e.target.value)}
                 />
@@ -466,7 +466,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>Campaign attribution (manual)</CardTitle>
           <CardDescription>
@@ -476,7 +476,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             CTWA session exists on the order, this path is unavailable.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+        <CardContent className="flex min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
           {!canEditManualCampaign ? (
             <p className="text-muted-foreground text-sm">
               This order is linked to a WhatsApp CTWA session—campaign attribution uses that

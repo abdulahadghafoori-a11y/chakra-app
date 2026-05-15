@@ -63,8 +63,8 @@ export function OrderFormFxBar({
       </p>
       {!initialFx ? (
         <p className="text-destructive font-medium">
-          No FX rate configured. Staff must set AFN per 1 USD before orders can be
-          saved.
+          No FX rate configured. Set AFN per 1 USD below or sync from an API before
+          saving orders.
         </p>
       ) : (
         <>
@@ -123,7 +123,7 @@ export function OrderFormFxBar({
     <div className="bg-muted/30 space-y-3 rounded-lg border p-3">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          USD ↔ AFN (staff)
+          USD ↔ AFN
         </p>
         <p className="text-muted-foreground text-[11px]">
           Line/courier amounts are <strong className="text-foreground">whole AFN</strong>

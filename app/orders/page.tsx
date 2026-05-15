@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OrdersListTable } from "@/components/orders-list-table";
 import { OrdersSortToolbar } from "@/components/orders-sort-toolbar";
 import { buttonVariants } from "@/components/ui/button";
+import { isCoreFeatureSet } from "@/lib/feature-set";
 import {
   groupLinesByOrderId,
   loadOrderLineSummaries,
@@ -22,6 +23,7 @@ export default async function OrdersIndexPage({
 }) {
   const sp = await searchParams;
   const sort = parseOrdersTableSort(sp.sort);
+  const coreMode = isCoreFeatureSet();
   const orderRows = await loadOrdersTableRows({ limit: 200, sort });
   const itemRows = await loadOrderLineSummaries(orderRows.map((o) => o.id));
   const itemsByOrder = groupLinesByOrderId(itemRows);
@@ -51,7 +53,11 @@ export default async function OrdersIndexPage({
           New order
         </Link>
       </div>
-      <OrdersListTable rows={orderRows} itemsByOrder={itemsByOrder} />
+      <OrdersListTable
+        rows={orderRows}
+        itemsByOrder={itemsByOrder}
+        coreMode={coreMode}
+      />
     </div>
   );
 }

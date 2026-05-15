@@ -2,7 +2,6 @@ import { NewOrderForm } from "@/components/new-order-form";
 import { listProducts } from "@/actions/products";
 import { listMetaCampaignsForManualAttribution } from "@/lib/campaigns-rollups";
 import { getPublicFxStateForOrderForm } from "@/lib/app-fx-usd-afn";
-import { getStaffSessionOptional } from "@/lib/staff-auth/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +14,14 @@ export default async function NewOrderPage({
 }) {
   const sp = await searchParams;
   const initialPhone = (sp.phone ?? "").trim() || undefined;
-  const [products, metaCampaignOptions, fxState, staff] = await Promise.all([
+  const [products, metaCampaignOptions, fxState] = await Promise.all([
     listProducts(),
     listMetaCampaignsForManualAttribution(),
     getPublicFxStateForOrderForm(),
-    getStaffSessionOptional(),
   ]);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 sm:space-y-6">
+    <div className="mx-auto w-full min-w-0 max-w-5xl space-y-5 sm:space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
           Create order
@@ -46,7 +44,7 @@ export default async function NewOrderPage({
           metaCampaignOptions={metaCampaignOptions}
           initialPhone={initialPhone}
           initialFx={fxState}
-          canStaffEditFx={staff != null}
+          canStaffEditFx
         />
       )}
     </div>
