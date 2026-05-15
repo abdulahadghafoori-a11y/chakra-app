@@ -70,25 +70,41 @@ export default async function ContactsPage({
           <Table className="min-w-[48rem]">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10 text-center tabular-nums">#</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead className="text-right tabular-nums">Sessions</TableHead>
-                <TableHead className="text-right tabular-nums">Orders</TableHead>
-                <TableHead className="text-right">Lifetime (USD)</TableHead>
-                <TableHead>Last order</TableHead>
-                <TableHead>Last CTWA</TableHead>
-                <TableHead>
-                  <span className="whitespace-nowrap">In system</span>
+                <TableHead className="w-10 text-center align-middle tabular-nums">
+                  #
                 </TableHead>
-                <TableHead className="w-[1%]"> </TableHead>
+                <TableHead className="text-center align-middle">Contact</TableHead>
+                <TableHead className="text-center align-middle">Phone</TableHead>
+                <TableHead className="text-center align-middle tabular-nums">
+                  Sessions
+                </TableHead>
+                <TableHead className="text-center align-middle tabular-nums">
+                  Orders
+                </TableHead>
+                <TableHead className="text-center align-middle">
+                  Lifetime (USD)
+                </TableHead>
+                <TableHead className="text-center align-middle">
+                  Last order
+                </TableHead>
+                <TableHead className="text-center align-middle">
+                  Last CTWA
+                </TableHead>
+                <TableHead className="text-center align-middle">
+                  <span className="inline-block leading-snug">
+                    In system
+                  </span>
+                </TableHead>
+                <TableHead className="w-[1%] text-center align-middle">
+                  {" "}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    className="text-muted-foreground"
+                    className="text-muted-foreground text-center align-middle"
                     colSpan={10}
                   >
                     {q
@@ -102,46 +118,46 @@ export default async function ContactsPage({
                   const lifetime = r.lifetimeValue ?? "0";
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
+                      <TableCell className="text-muted-foreground align-middle text-center text-xs tabular-nums">
                         {rankOffset + rowIndex + 1}
                       </TableCell>
-                      <TableCell>
-                        <div className="max-w-[12rem] font-medium">
+                      <TableCell className="max-w-[14rem] align-middle text-center">
+                        <div className="break-words font-medium leading-snug">
                           {r.name?.trim() || (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </div>
-                        <div className="text-muted-foreground text-xs">
+                        <div className="text-muted-foreground mt-1 text-xs leading-snug break-words">
                           {r.countryName ?? r.countryCode ?? "—"}
                         </div>
                       </TableCell>
-                      <TableCell className="max-w-[11rem] font-mono text-xs">
+                      <TableCell className="max-w-[12rem] align-middle text-center font-mono text-xs leading-snug break-all">
                         {phone.formattedInternational}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="align-middle text-center tabular-nums">
                         {r.sessionCount}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="align-middle text-center tabular-nums">
                         {r.orderCount}
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
+                      <TableCell className="align-middle text-center font-medium tabular-nums">
                         {Number.parseFloat(lifetime).toFixed(2)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground max-w-[12rem] align-middle text-center text-xs leading-snug whitespace-normal break-words">
                         {formatDateTimeKabul(r.lastOrderAt)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground max-w-[12rem] align-middle text-center text-xs leading-snug whitespace-normal break-words">
                         {formatDateTimeKabul(r.lastSessionAt)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      <TableCell className="text-muted-foreground max-w-[12rem] align-middle text-center text-xs leading-snug whitespace-normal break-words">
                         {formatDateTimeKabul(r.createTime)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end sm:gap-1">
+                      <TableCell className="align-middle text-center">
+                        <div className="flex flex-row flex-wrap items-center justify-center gap-2">
                           <Link
                             className={cn(
                               buttonVariants({ variant: "outline", size: "sm" }),
-                              "h-8",
+                              "min-h-11 shrink-0 px-3 sm:min-h-9",
                             )}
                             href={`/orders/new?phone=${encodeURIComponent(r.phoneNumber)}`}
                           >
@@ -150,7 +166,7 @@ export default async function ContactsPage({
                           <Link
                             className={cn(
                               buttonVariants({ variant: "ghost", size: "sm" }),
-                              "h-8",
+                              "min-h-11 shrink-0 px-3 sm:min-h-9",
                             )}
                             href={`/?contactId=${encodeURIComponent(r.id)}`}
                           >

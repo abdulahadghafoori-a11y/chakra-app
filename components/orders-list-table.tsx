@@ -66,9 +66,16 @@ export function OrdersListTable({
   return (
     <>
       {filterContactId && rows[0] ? (
-        <p className="mt-2 text-sm">
+        <p className="mt-2 text-center text-sm sm:text-left">
           <span className="text-muted-foreground">Filtered by contact</span>{" "}
-          <span className="font-mono text-xs">{rows[0].phone}</span> ·{" "}
+          <Link
+            className="font-mono text-xs text-primary underline underline-offset-2"
+            href={`/contacts?q=${encodeURIComponent(rows[0].phone)}`}
+            title="Open contact search for this phone"
+          >
+            {rows[0].phone}
+          </Link>{" "}
+          ·{" "}
           <Link
             className="text-primary underline underline-offset-2"
             href="/"
@@ -78,7 +85,7 @@ export function OrdersListTable({
         </p>
       ) : null}
       {filterContactId && rows.length === 0 ? (
-        <p className="mt-2 text-sm">
+        <p className="mt-2 text-center text-sm sm:text-left">
           <span className="text-muted-foreground">
             No orders for this contact yet.
           </span>{" "}
@@ -89,24 +96,35 @@ export function OrdersListTable({
       ) : null}
       <div className="-mx-3 overflow-x-auto sm:mx-0">
         <div className="inline-block min-w-full overflow-hidden rounded-xl border align-middle">
-          <Table className="min-w-[36rem]">
+          <Table className="min-w-[48rem]">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10 text-center tabular-nums">#</TableHead>
-                <TableHead>Order</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Products</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>CAPI</TableHead>
-                <TableHead className="text-right">Recorded</TableHead>
-                <TableHead className="text-right">Order event</TableHead>
-                <TableHead className="text-center">Actions</TableHead>
+                <TableHead className="w-10 text-center align-middle tabular-nums">
+                  #
+                </TableHead>
+                <TableHead className="text-center align-middle">Order</TableHead>
+                <TableHead className="text-center align-middle">Phone</TableHead>
+                <TableHead className="text-center align-middle">
+                  Products
+                </TableHead>
+                <TableHead className="text-center align-middle">Total</TableHead>
+                <TableHead className="text-center align-middle">CAPI</TableHead>
+                <TableHead className="text-center align-middle">
+                  Recorded
+                </TableHead>
+                <TableHead className="text-center align-middle">
+                  Order event
+                </TableHead>
+                <TableHead className="text-center align-middle">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell className="text-muted-foreground" colSpan={9}>
+                  <TableCell
+                    className="text-muted-foreground text-center align-middle"
+                    colSpan={9}
+                  >
                     No orders yet. Create products, then record an order.
                   </TableCell>
                 </TableRow>
@@ -115,60 +133,85 @@ export function OrdersListTable({
                   const items = itemsByOrder.get(r.id) ?? [];
                   const productSummary =
                     items.length === 0
-                      ? "—"
+                      ? ""
                       : items
                           .map((it) => `${it.productName} × ${it.quantity}`)
                           .join(", ");
+                  const totalPrimary = `${r.currency} ${formatOrderUsdTable(r.value)}`;
+                  const totalTitle =
+                    r.valueAfn != null && r.valueAfn.trim() !== ""
+                      ? `${totalPrimary} · AFN ${Math.round(Number(r.valueAfn))}`
+                      : totalPrimary;
 
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
+                      <TableCell className="text-muted-foreground align-middle text-center text-xs tabular-nums">
                         {rowIndex + 1}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="max-w-[10rem] min-w-0 align-middle text-center font-mono text-xs">
                         <Link
-                          className="text-primary underline-offset-2 hover:underline"
+                          className="text-primary block truncate underline-offset-2 hover:underline"
                           href={`/orders/${encodeURIComponent(r.id)}`}
+                          title={r.id}
                         >
                           {r.id.length > 14 ? `${r.id.slice(0, 12)}…` : r.id}
                         </Link>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">{r.phone}</TableCell>
-                      <TableCell className="max-w-[280px] text-sm">
-                        <span className="line-clamp-2" title={productSummary}>
-                          {productSummary}
-                        </span>
+                      <TableCell className="max-w-[10rem] min-w-0 align-middle text-center font-mono text-xs">
+                        <Link
+                          className="text-primary block truncate underline-offset-2 hover:underline"
+                          href={`/contacts?q=${encodeURIComponent(r.phone)}`}
+                          title={r.phone}
+                        >
+                          {r.phone}
+                        </Link>
                       </TableCell>
-                      <TableCell className="max-w-[8rem] text-right text-xs tabular-nums leading-tight">
-                        <span className="block text-foreground">
-                          {r.currency} {formatOrderUsdTable(r.value)}
-                        </span>
-                        {r.valueAfn != null && r.valueAfn.trim() !== "" ? (
-                          <span className="text-muted-foreground block">
-                            AFN {Math.round(Number(r.valueAfn))}
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>
-                        {r.capiSent ? (
-                          <Badge variant="default">sent</Badge>
+                      <TableCell className="max-w-[12rem] min-w-0 align-middle px-2 text-center text-sm">
+                        {items.length === 0 ? (
+                          <span className="text-muted-foreground">—</span>
                         ) : (
-                          <Badge variant="secondary">pending</Badge>
+                          <Link
+                            href={`/orders/${encodeURIComponent(r.id)}`}
+                            className="text-foreground block truncate hover:text-primary hover:underline"
+                            title={productSummary}
+                          >
+                            {productSummary}
+                          </Link>
                         )}
                       </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap text-right text-xs">
+                      <TableCell className="max-w-[7.5rem] min-w-0 align-middle text-center text-xs tabular-nums">
+                        <span
+                          className="block truncate font-medium text-foreground"
+                          title={totalTitle}
+                        >
+                          {totalPrimary}
+                        </span>
+                      </TableCell>
+                      <TableCell className="align-middle text-center">
+                        <div className="flex justify-center">
+                          {r.capiSent ? (
+                            <Badge variant="default">sent</Badge>
+                          ) : (
+                            <Badge variant="secondary">pending</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground max-w-[12rem] align-middle text-center text-xs leading-snug whitespace-normal break-words">
                         {formatOrderTableWhen(r.createdAt)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap text-right text-xs">
+                      <TableCell className="text-muted-foreground max-w-[12rem] align-middle text-center text-xs leading-snug whitespace-normal break-words">
                         {formatOrderTableWhen(r.orderEventAt)}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex flex-wrap items-center justify-center gap-1">
+                      <TableCell className="align-middle text-center">
+                        <div className="flex flex-wrap items-center justify-center gap-2">
                           <Link
                             href={`/orders/${encodeURIComponent(r.id)}`}
                             className={cn(
-                              buttonVariants({ variant: "outline", size: "xs" }),
-                              "no-underline",
+                              buttonVariants({
+                                variant: "outline",
+                                size: "sm",
+                              }),
+                              "no-underline min-h-11 min-w-[4.75rem] px-3 sm:min-h-9",
                             )}
                           >
                             Edit
@@ -176,7 +219,8 @@ export function OrdersListTable({
                           <Button
                             type="button"
                             variant="destructive"
-                            size="xs"
+                            size="sm"
+                            className="min-h-11 min-w-[4.75rem] px-3 sm:min-h-9"
                             disabled={pending}
                             onClick={() => setDeleteTargetId(r.id)}
                           >

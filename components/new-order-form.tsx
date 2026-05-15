@@ -1059,7 +1059,7 @@ export function NewOrderForm({
                         </FormLabel>
                         <FormControl>
                           <Input
-                            className="h-9 font-mono text-sm tabular-nums"
+                            className="h-11 min-h-11 w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:h-9 sm:min-h-9 sm:text-sm"
                             type="datetime-local"
                             step={60}
                             name={field.name}

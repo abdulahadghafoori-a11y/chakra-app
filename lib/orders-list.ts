@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 
 import { contacts, orderItems, orders, products } from "@/drizzle/schema";
 import { formatDateTimeKabul } from "@/lib/kabul-time";
@@ -25,10 +25,55 @@ export type OrderTableRow = {
 
 export type OrderLineSummary = {
   orderId: string;
+  productId: string;
   productName: string;
   quantity: number;
   lineValue: string;
 };
+
+/** URL/query sort for `/orders` table (default matches legacy `created_at` desc). */
+export type OrdersTableSort =
+  | "recorded_desc"
+  | "recorded_asc"
+  | "event_desc"
+  | "event_asc"
+  | "total_desc"
+  | "total_asc";
+
+export function parseOrdersTableSort(
+  raw: string | undefined,
+): OrdersTableSort {
+  const v = raw?.trim();
+  if (
+    v === "recorded_asc" ||
+    v === "event_desc" ||
+    v === "event_asc" ||
+    v === "total_desc" ||
+    v === "total_asc"
+  ) {
+    return v;
+  }
+  return "recorded_desc";
+}
+
+function ordersTableOrderBy(sort: OrdersTableSort) {
+  switch (sort) {
+    case "recorded_desc":
+      return desc(orders.createdAt);
+    case "recorded_asc":
+      return asc(orders.createdAt);
+    case "event_desc":
+      return desc(orders.orderEventAt);
+    case "event_asc":
+      return asc(orders.orderEventAt);
+    case "total_desc":
+      return desc(orders.value);
+    case "total_asc":
+      return asc(orders.value);
+    default:
+      return desc(orders.createdAt);
+  }
+}
 
 /**
  * Orders for a list table (phone, CAPI, totals) with optional contact filter.
@@ -36,7 +81,9 @@ export type OrderLineSummary = {
 export async function loadOrdersTableRows(options: {
   limit: number;
   filterContactId?: string;
+  sort?: OrdersTableSort;
 }): Promise<OrderTableRow[]> {
+  const sortKey = options.sort ?? "recorded_desc";
   const base = db
     .select({
       id: orders.id,
@@ -56,7 +103,7 @@ export async function loadOrdersTableRows(options: {
     ? base.where(eq(orders.contactId, options.filterContactId))
     : base
   )
-    .orderBy(desc(orders.createdAt))
+    .orderBy(ordersTableOrderBy(sortKey))
     .limit(options.limit);
 
   return rows.map((r) => {
@@ -85,6 +132,7 @@ export async function loadOrderLineSummaries(
   return db
     .select({
       orderId: orderItems.orderId,
+      productId: products.id,
       productName: products.name,
       quantity: orderItems.quantity,
       lineValue: orderItems.lineValue,
@@ -95,6 +143,7 @@ export async function loadOrderLineSummaries(
     .then((rows) =>
       rows.map((r) => ({
         orderId: r.orderId,
+        productId: r.productId,
         productName: r.productName,
         quantity: r.quantity,
         lineValue: String(r.lineValue),

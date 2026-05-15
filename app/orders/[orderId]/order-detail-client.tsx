@@ -352,7 +352,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
                 if (v) setNextStatus(v);
               }}
             >
-              <SelectTrigger id="order-status-select" className="w-[220px]">
+              <SelectTrigger id="order-status-select" className="w-full min-w-0 sm:w-[220px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -372,7 +372,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
               <Input
                 id="order-capi-time"
                 type="datetime-local"
-                className="w-[11rem]"
+                className="w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:w-auto sm:max-w-[12rem] sm:text-sm"
                 value={capiEventTimeKabul}
                 onChange={(e) => setCapiEventTimeKabul(e.target.value)}
               />
@@ -444,7 +444,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
                 <Input
                   id="resend-capi-time"
                   type="datetime-local"
-                  className="w-[11rem]"
+                  className="w-full max-w-full min-w-0 font-mono text-base tabular-nums sm:w-auto sm:max-w-[12rem] sm:text-sm"
                   value={resendCapiEventTimeKabul}
                   onChange={(e) => setResendCapiEventTimeKabul(e.target.value)}
                 />

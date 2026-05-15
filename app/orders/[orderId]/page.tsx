@@ -33,14 +33,14 @@ export default async function OrderDetailPage({ params }: Props) {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
+        <div className="min-w-0 flex-1 space-y-2">
           <Link
             href="/orders"
             className="text-muted-foreground text-sm underline-offset-4 hover:underline"
           >
             ← Orders
           </Link>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
               Order
             </h1>
@@ -54,29 +54,36 @@ export default async function OrderDetailPage({ params }: Props) {
               <Badge variant="outline">CAPI pending</Badge>
             )}
           </div>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground max-w-full text-sm leading-relaxed break-words">
             <span className="font-mono">{order.phone}</span>
             {order.ctwaClid ? (
               <>
                 {" "}
                 · CTWA{" "}
-                <span className="font-mono text-xs">{order.ctwaClid}</span>
+                <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs break-all">
+                  {order.ctwaClid}
+                </code>
               </>
             ) : null}
             {order.manualMetaCampaignId ? (
               <>
                 {" "}
                 · Campaign (manual){" "}
-                <span className="font-mono text-xs">
+                <span className="font-mono text-xs break-all">
                   {(order.manualCampaignName ?? "").trim() ||
                     order.manualMetaCampaignId}
                 </span>
               </>
             ) : null}
             {" "}
-            · Recorded {formatOrderTableWhen(order.createdAt)}
+            · Recorded{" "}
+            <span className="whitespace-normal">
+              {formatOrderTableWhen(order.createdAt)}
+            </span>
             {" · Order event "}
-            {formatOrderTableWhen(order.orderEventAt)}
+            <span className="whitespace-normal">
+              {formatOrderTableWhen(order.orderEventAt)}
+            </span>
           </p>
           <p className="text-lg font-medium tabular-nums">
             Total {money(order.value, order.currency)}

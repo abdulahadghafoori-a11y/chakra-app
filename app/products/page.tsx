@@ -77,7 +77,11 @@ export default async function ProductsPage() {
               </TableRow>
             ) : (
               productRows.map((p) => (
-                <TableRow key={p.id}>
+                <TableRow
+                  key={p.id}
+                  id={`product-${p.id}`}
+                  className="scroll-mt-24"
+                >
                   <TableCell>{p.name}</TableCell>
                   <TableCell className="font-mono text-xs">{p.sku}</TableCell>
                   <TableCell className="text-right">

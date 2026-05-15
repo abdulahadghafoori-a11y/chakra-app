@@ -39,6 +39,8 @@ function buildPath(
   return qs ? `${pathname}?${qs}` : pathname;
 }
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 export function ContactsToolbar({ initialQ, order, page, total }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,12 +54,32 @@ export function ContactsToolbar({ initialQ, order, page, total }: Props) {
   const pageCount = Math.max(1, Math.ceil(total / CONTACTS_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
 
-  const push = useCallback(
+  const pushUrl = useCallback(
     (updates: Record<string, string | undefined>) => {
       router.push(buildPath(pathname, searchParams, updates));
     },
     [pathname, router, searchParams],
   );
+
+  const replaceUrl = useCallback(
+    (updates: Record<string, string | undefined>) => {
+      router.replace(buildPath(pathname, searchParams, updates));
+    },
+    [pathname, router, searchParams],
+  );
+
+  const urlQNormalized = (searchParams.get("q") ?? "").trim();
+
+  useEffect(() => {
+    const trimmed = q.trim();
+    if (trimmed === urlQNormalized) return;
+
+    const id = window.setTimeout(() => {
+      replaceUrl({ q: trimmed || undefined, page: "1" });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(id);
+  }, [q, replaceUrl, urlQNormalized]);
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
@@ -65,7 +87,7 @@ export function ContactsToolbar({ initialQ, order, page, total }: Props) {
         className="flex min-w-0 max-w-md flex-1 flex-col gap-2 sm:flex-row sm:items-center"
         onSubmit={(e) => {
           e.preventDefault();
-          push({ q: q.trim() || undefined, page: "1" });
+          replaceUrl({ q: q.trim() || undefined, page: "1" });
         }}
       >
         <div className="relative min-w-0 flex-1">
@@ -94,7 +116,7 @@ export function ContactsToolbar({ initialQ, order, page, total }: Props) {
             value={order ?? "newest"}
             onValueChange={(v) => {
               if (!v) return;
-              push({ order: v, page: "1" });
+              pushUrl({ order: v, page: "1" });
             }}
           >
             <SelectTrigger className="h-9 w-[10.5rem]" size="sm">
@@ -116,7 +138,7 @@ export function ContactsToolbar({ initialQ, order, page, total }: Props) {
               className="size-9 shrink-0"
               disabled={safePage <= 1}
               onClick={() =>
-                push({ page: String(Math.max(1, safePage - 1)) })
+                pushUrl({ page: String(Math.max(1, safePage - 1)) })
               }
               aria-label="Previous page"
             >
@@ -132,7 +154,7 @@ export function ContactsToolbar({ initialQ, order, page, total }: Props) {
               className="size-9 shrink-0"
               disabled={safePage >= pageCount}
               onClick={() =>
-                push({ page: String(Math.min(pageCount, safePage + 1)) })
+                pushUrl({ page: String(Math.min(pageCount, safePage + 1)) })
               }
               aria-label="Next page"
             >
