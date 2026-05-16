@@ -101,6 +101,8 @@ type SerializedOrder = {
   valueUsd: string;
   path: "ctwa" | "manual";
   metaAdId: string | null;
+  /** Latest CTWA referral send time for this buyer (same contact across sessions). */
+  buyerLatestCtwaSendAtIso: string | null;
 };
 
 type SubtreeRow = {
@@ -649,7 +651,10 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
       <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="text-base">Attributed orders</CardTitle>
-          <CardDescription>Newest first (up to 250).</CardDescription>
+          <CardDescription>
+            Newest first (up to 250). “Last buyer CTWA” is the latest WhatsApp referral
+            timestamp for this customer across CTWA sessions.
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
@@ -658,6 +663,9 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                 <TableHead>Order</TableHead>
                 <TableHead>When</TableHead>
                 <TableHead>Path</TableHead>
+                <TableHead className="whitespace-nowrap">
+                  Last buyer CTWA
+                </TableHead>
                 <TableHead className="text-right">Value</TableHead>
               </TableRow>
             </TableHeader>
@@ -674,6 +682,9 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                   </TableCell>
                   <TableCell className="text-xs">{o.orderEventAtIso}</TableCell>
                   <TableCell className="text-xs uppercase">{o.path}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                    {o.buyerLatestCtwaSendAtIso ?? "—"}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-xs">
                     {formatMoney(Number(o.valueUsd))}
                   </TableCell>

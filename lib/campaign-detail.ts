@@ -62,6 +62,18 @@ function num(s: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Neon/driver may return aggregates as strings; normalize for `.toISOString()` callers. */
+function coercePgDate(raw: unknown): Date | null {
+  if (raw == null) return null;
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw;
+  const d =
+    typeof raw === "string" || typeof raw === "number"
+      ? new Date(raw)
+      : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
 export type CampaignDailyPerformanceRow = {
   day: string;
   spend: number;
@@ -152,6 +164,11 @@ export type CampaignAttributedOrderRow = {
   valueUsd: string;
   path: "ctwa" | "manual";
   metaAdId: string | null;
+  /**
+   * Latest CTWA referral `send_time` for this buyer (`orders.contact_id`), across all sessions —
+   * use as “when they last messaged from an ad.”
+   */
+  buyerLatestCtwaSendAt: Date | null;
 };
 
 export type AttributionSplit = {
@@ -706,6 +723,7 @@ export async function listAttributedOrdersForCampaign(
       status: orders.status,
       value: orders.value,
       metaAdId: ctwaSessions.metaAdId,
+      contactId: orders.contactId,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -724,6 +742,7 @@ export async function listAttributedOrdersForCampaign(
       orderEventAt: orders.orderEventAt,
       status: orders.status,
       value: orders.value,
+      contactId: orders.contactId,
     })
     .from(orders)
     .where(
@@ -735,6 +754,30 @@ export async function listAttributedOrdersForCampaign(
       ),
     );
 
+  const contactIds = [
+    ...new Set([
+      ...ctwaOrders.map((r) => r.contactId),
+      ...manualOrders.map((r) => r.contactId),
+    ]),
+  ];
+
+  const latestCtwaSendByContact = new Map<string, Date>();
+  if (contactIds.length) {
+    const latestRows = await db
+      .select({
+        contactId: ctwaSessions.contactId,
+        latestSend: sql<Date>`max(${ctwaSessions.sendTime})`,
+      })
+      .from(ctwaSessions)
+      .where(inArray(ctwaSessions.contactId, contactIds))
+      .groupBy(ctwaSessions.contactId);
+
+    for (const row of latestRows) {
+      const ts = coercePgDate(row.latestSend);
+      if (ts) latestCtwaSendByContact.set(row.contactId, ts);
+    }
+  }
+
   const merged: CampaignAttributedOrderRow[] = [
     ...ctwaOrders.map((r) => ({
       orderId: r.orderId,
@@ -743,6 +786,8 @@ export async function listAttributedOrdersForCampaign(
       valueUsd: r.value,
       path: "ctwa" as const,
       metaAdId: r.metaAdId,
+      buyerLatestCtwaSendAt:
+        latestCtwaSendByContact.get(r.contactId) ?? null,
     })),
     ...manualOrders.map((r) => ({
       orderId: r.orderId,
@@ -751,6 +796,8 @@ export async function listAttributedOrdersForCampaign(
       valueUsd: r.value,
       path: "manual" as const,
       metaAdId: null as string | null,
+      buyerLatestCtwaSendAt:
+        latestCtwaSendByContact.get(r.contactId) ?? null,
     })),
   ];
 

@@ -172,6 +172,8 @@ export default async function CampaignDetailPage({
     valueUsd: r.valueUsd,
     path: r.path,
     metaAdId: r.metaAdId,
+    buyerLatestCtwaSendAtIso:
+      r.buyerLatestCtwaSendAt?.toISOString() ?? null,
   }));
 
   return (

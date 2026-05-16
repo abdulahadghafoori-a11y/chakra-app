@@ -236,9 +236,7 @@ function formatMarketingApiActivityDetails(
   extra: Record<string, unknown>,
   eventType: string,
 ): string {
-  if (extra.type === "composite_data") {
-    return compositeDataSummary(eventType);
-  }
+  /** Budget / payment payloads may arrive with root `type: composite_data`; still parse amounts. */
 
   const linkage = formatCampaignLinkageRecursive(extra);
   if (linkage) return linkage;
@@ -315,6 +313,9 @@ function formatMarketingApiActivityDetails(
 
   if (nv && typeof nv === "object" && !Array.isArray(nv)) {
     const rec = nv as Record<string, unknown>;
+    const nestedPair = tryPairPaymentAmounts(rec.old_value, rec.new_value);
+    if (nestedPair) return nestedPair;
+
     if (rec.type === "composite_data") {
       return compositeDataSummary(eventType);
     }
@@ -341,6 +342,10 @@ function formatMarketingApiActivityDetails(
   if (ovStr && nvStr) return `From ${ovStr} — to ${nvStr}`;
   if (nvStr) return nvStr;
   if (ovStr) return ovStr;
+
+  if (extra.type === "composite_data") {
+    return compositeDataSummary(eventType);
+  }
 
   return truncateDetail(compactExtraFallback(extra), 380);
 }

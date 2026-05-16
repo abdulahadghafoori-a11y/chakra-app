@@ -37,6 +37,19 @@ function sliceCampaignSearchParams(sp: Record<string, string>) {
   };
 }
 
+/** Stack sections vertically for importing into dashboards / spreadsheets. */
+function appendVerticalReportBlock(
+  sheet: ExcelJS.Worksheet,
+  sectionTitle: string,
+  headers: string[],
+  dataRows: (string | number | boolean | null | undefined)[][],
+) {
+  sheet.addRow([sectionTitle]);
+  sheet.addRow(headers);
+  for (const row of dataRows) sheet.addRow(row);
+  sheet.addRow([]);
+}
+
 export async function GET(
   req: Request,
   context: { params: Promise<{ campaignId: string }> },
@@ -209,27 +222,26 @@ export async function GET(
     "weighted_frequency",
     "weighted_quality_score",
   ];
+  const dailyDataRows = daily.map((d) => [
+    d.day,
+    d.spend,
+    d.impressions,
+    d.clicks,
+    d.ctr ?? "",
+    d.messagingStarted,
+    d.attributedOrdersCount,
+    d.convertedRevenue,
+    d.convertedCogs,
+    d.deliveryCost,
+    d.payableAdSpend,
+    d.salesCommission,
+    d.dailyNetProfit,
+    d.weightedFrequency ?? "",
+    d.weightedQualityScore ?? "",
+  ]);
   const dailySheet = workbook.addWorksheet("Daily");
   dailySheet.addRow(dailyHeader);
-  for (const d of daily) {
-    dailySheet.addRow([
-      d.day,
-      d.spend,
-      d.impressions,
-      d.clicks,
-      d.ctr ?? "",
-      d.messagingStarted,
-      d.attributedOrdersCount,
-      d.convertedRevenue,
-      d.convertedCogs,
-      d.deliveryCost,
-      d.payableAdSpend,
-      d.salesCommission,
-      d.dailyNetProfit,
-      d.weightedFrequency ?? "",
-      d.weightedQualityScore ?? "",
-    ]);
-  }
+  for (const row of dailyDataRows) dailySheet.addRow(row);
 
   const adsHeader = [
     "meta_ad_id",
@@ -263,42 +275,41 @@ export async function GET(
     "cpm",
     "cost_per_ctwa",
   ];
+  const adsDataRows = adsBreakdown.map((a) => [
+    a.metaAdId,
+    a.adName ?? "",
+    a.verdict,
+    a.impressions,
+    a.clicks,
+    a.ctr ?? "",
+    a.spend,
+    a.paidAdSpend,
+    a.ctwaSessions,
+    a.metaMessagingConversationsStarted,
+    a.metaPurchases,
+    a.ordersCount,
+    a.paidOrdersCount,
+    a.pendingOrdersCount,
+    a.convertedOrdersCount,
+    a.convertedRevenue,
+    a.grossProfitPaid,
+    a.salesCommissionPaid,
+    a.paidOperationalCosts,
+    a.netProfitPaid,
+    a.verdictDetail.cpaPaid ?? "",
+    a.verdictDetail.profitRoas ?? "",
+    a.verdictDetail.capiRate ?? "",
+    a.metaWeeklyAvgFrequency ?? "",
+    a.metaQualityScore7d ?? "",
+    a.metaQualityLowStreakDays ?? "",
+    a.metaFirstImpressionShare7d ?? "",
+    a.cpc ?? "",
+    a.cpm ?? "",
+    a.costPerCtwa ?? "",
+  ]);
   const adsSheet = workbook.addWorksheet("Ads");
   adsSheet.addRow(adsHeader);
-  for (const a of adsBreakdown) {
-    adsSheet.addRow([
-      a.metaAdId,
-      a.adName ?? "",
-      a.verdict,
-      a.impressions,
-      a.clicks,
-      a.ctr ?? "",
-      a.spend,
-      a.paidAdSpend,
-      a.ctwaSessions,
-      a.metaMessagingConversationsStarted,
-      a.metaPurchases,
-      a.ordersCount,
-      a.paidOrdersCount,
-      a.pendingOrdersCount,
-      a.convertedOrdersCount,
-      a.convertedRevenue,
-      a.grossProfitPaid,
-      a.salesCommissionPaid,
-      a.paidOperationalCosts,
-      a.netProfitPaid,
-      a.verdictDetail.cpaPaid ?? "",
-      a.verdictDetail.profitRoas ?? "",
-      a.verdictDetail.capiRate ?? "",
-      a.metaWeeklyAvgFrequency ?? "",
-      a.metaQualityScore7d ?? "",
-      a.metaQualityLowStreakDays ?? "",
-      a.metaFirstImpressionShare7d ?? "",
-      a.cpc ?? "",
-      a.cpm ?? "",
-      a.costPerCtwa ?? "",
-    ]);
-  }
+  for (const row of adsDataRows) adsSheet.addRow(row);
 
   const ordersHeader = [
     "order_id",
@@ -307,30 +318,30 @@ export async function GET(
     "value_usd",
     "path",
     "meta_ad_id",
+    "buyer_latest_ctwa_send_at_iso",
   ];
+  const ordersDataRows = attributedOrders.map((o) => [
+    o.orderId,
+    o.orderEventAt.toISOString(),
+    o.status,
+    o.valueUsd,
+    o.path,
+    o.metaAdId ?? "",
+    o.buyerLatestCtwaSendAt?.toISOString() ?? "",
+  ]);
   const ordersSheet = workbook.addWorksheet("Orders");
   ordersSheet.addRow(ordersHeader);
-  for (const o of attributedOrders) {
-    ordersSheet.addRow([
-      o.orderId,
-      o.orderEventAt.toISOString(),
-      o.status,
-      o.valueUsd,
-      o.path,
-      o.metaAdId ?? "",
-    ]);
-  }
+  for (const row of ordersDataRows) ordersSheet.addRow(row);
 
-  const activitySheet = workbook.addWorksheet("Activity");
-  activitySheet.addRow([
+  const activityHeader = [
     "activity",
     "activity_details",
     "item_changed",
     "changed_by",
     "when_iso",
     "when_display",
-  ]);
-  for (const r of activityRows) {
+  ];
+  const activityDataRows = activityRows.map((r) => {
     const presented = presentCampaignActivityRow({
       campaignId,
       campaignName: header.name,
@@ -340,15 +351,48 @@ export async function GET(
       body: r.body,
       metadata: r.metadata ?? null,
     });
-    activitySheet.addRow([
+    return [
       presented.activity,
       presented.activityDetails,
       presented.itemChanged,
       presented.changedBy,
       presented.whenIso,
       formatActivityWhenForLocale(presented.whenIso),
-    ]);
-  }
+    ];
+  });
+  const activitySheet = workbook.addWorksheet("Activity");
+  activitySheet.addRow(activityHeader);
+  for (const row of activityDataRows) activitySheet.addRow(row);
+
+  const unifiedSheet = workbook.addWorksheet("All");
+  unifiedSheet.addRow([
+    `combined_export campaign_id=${campaignId} generated_at=${generatedAt} range_utc_days=${parsedRange.sinceDay}..${parsedRange.untilDay} (Daily, then Ads, then Orders, then Activity)`,
+  ]);
+  unifiedSheet.addRow([]);
+  appendVerticalReportBlock(
+    unifiedSheet,
+    "--- SECTION: Daily (UTC) ---",
+    dailyHeader,
+    dailyDataRows,
+  );
+  appendVerticalReportBlock(
+    unifiedSheet,
+    "--- SECTION: Ads (primary window) ---",
+    adsHeader,
+    adsDataRows,
+  );
+  appendVerticalReportBlock(
+    unifiedSheet,
+    "--- SECTION: Orders (attributed) ---",
+    ordersHeader,
+    ordersDataRows,
+  );
+  appendVerticalReportBlock(
+    unifiedSheet,
+    "--- SECTION: Activity (Meta marketing API archive) ---",
+    activityHeader,
+    activityDataRows,
+  );
 
   const buf = await workbook.xlsx.writeBuffer();
   const fname = `campaign-report_${safeId}_${parsedRange.sinceDay}_${parsedRange.untilDay}.xlsx`;
