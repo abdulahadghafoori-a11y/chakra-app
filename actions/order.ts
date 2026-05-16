@@ -39,7 +39,8 @@ import {
   loadOrderPurchaseCapiContext,
 } from "@/lib/order-meta-capi";
 import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
-import { assertStaffSession } from "@/lib/staff-auth/guard";
+import { recordManualCampaignAttributionChange } from "@/lib/campaign-activity";
+import { assertStaffSession, requireStaffSession } from "@/lib/staff-auth/guard";
 import {
   APP_CURRENCY,
   createOrderSchema,
@@ -574,6 +575,19 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
+  if (manualCampaignIdToSave && !latestSession?.id) {
+    try {
+      await recordManualCampaignAttributionChange({
+        actorEmail: "public-order-create",
+        orderId: inserted.id,
+        fromCampaignId: null,
+        toCampaignId: manualCampaignIdToSave,
+      });
+    } catch (e) {
+      console.error("[createOrder] attribution audit failed", e);
+    }
+  }
+
   revalidatePath("/campaigns");
   revalidatePath("/orders");
   revalidatePath("/orders/new");
@@ -710,7 +724,7 @@ export type LinkOrderManualCampaignResult =
 export async function linkOrderManualCampaign(
   raw: unknown,
 ): Promise<LinkOrderManualCampaignResult> {
-  await assertStaffSession();
+  const staffSession = await requireStaffSession();
   const parsed = linkOrderManualCampaignSchema.safeParse(raw);
   if (!parsed.success) {
     return {
@@ -724,6 +738,7 @@ export async function linkOrderManualCampaign(
     .select({
       id: orders.id,
       ctwaSessionId: orders.ctwaSessionId,
+      manualMetaCampaignId: orders.manualMetaCampaignId,
     })
     .from(orders)
     .where(eq(orders.id, orderId))
@@ -738,6 +753,11 @@ export async function linkOrderManualCampaign(
     };
   }
 
+  const prevManual =
+    typeof order.manualMetaCampaignId === "string"
+      ? order.manualMetaCampaignId.trim() || null
+      : null;
+
   if (metaCampaignId === "") {
     await db
       .update(orders)
@@ -746,6 +766,17 @@ export async function linkOrderManualCampaign(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+
+    try {
+      await recordManualCampaignAttributionChange({
+        actorEmail: staffSession.email,
+        orderId,
+        fromCampaignId: prevManual,
+        toCampaignId: null,
+      });
+    } catch (e) {
+      console.error("[linkOrderManualCampaign] attribution audit failed", e);
+    }
 
     revalidatePath("/campaigns");
     revalidatePath("/orders");
@@ -776,6 +807,17 @@ export async function linkOrderManualCampaign(
       updatedAt: new Date(),
     })
     .where(eq(orders.id, orderId));
+
+  try {
+    await recordManualCampaignAttributionChange({
+      actorEmail: staffSession.email,
+      orderId,
+      fromCampaignId: prevManual,
+      toCampaignId: metaCampaignId,
+    });
+  } catch (e) {
+    console.error("[linkOrderManualCampaign] attribution audit failed", e);
+  }
 
   revalidatePath("/campaigns");
   revalidatePath("/orders");

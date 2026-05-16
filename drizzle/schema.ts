@@ -72,6 +72,61 @@ export const metaCampaigns = pgTable("meta_campaigns", {
     .notNull(),
 });
 
+/**
+ * Archived Marketing API activity rows (`GET act_{id}/activities`).
+ * Short API retention (~days); local rows extend history until `event_time` retention prune.
+ */
+export const metaMarketingActivities = pgTable(
+  "meta_marketing_activities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    metaCampaignId: text("meta_campaign_id")
+      .notNull()
+      .references(() => metaCampaigns.id, { onDelete: "cascade" }),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    eventType: text("event_type").notNull(),
+    translatedEventType: text("translated_event_type"),
+    actorId: text("actor_id"),
+    actorName: text("actor_name"),
+    applicationName: text("application_name"),
+    objectId: text("object_id"),
+    objectName: text("object_name"),
+    objectType: text("object_type"),
+    extraData: jsonb("extra_data").$type<Record<string, unknown> | null>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("meta_marketing_activities_campaign_event_idx").on(
+      t.metaCampaignId,
+      t.eventTime,
+    ),
+    index("meta_marketing_activities_event_time_idx").on(t.eventTime),
+  ],
+);
+
+/** Notes, Meta sync diffs, and manual attribution audit rows for campaign drill-down + CSV export. */
+export const campaignActivity = pgTable(
+  "campaign_activity",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    metaCampaignId: text("meta_campaign_id")
+      .notNull()
+      .references(() => metaCampaigns.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdByEmail: text("created_by_email").notNull(),
+    kind: text("kind").notNull(),
+    body: text("body").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+  },
+  (t) => [
+    index("campaign_activity_meta_campaign_id_idx").on(t.metaCampaignId),
+    index("campaign_activity_created_at_idx").on(t.createdAt),
+  ],
+);
+
 /** Meta ad set under a campaign. */
 export const metaAdSets = pgTable(
   "meta_ad_sets",

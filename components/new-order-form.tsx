@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
@@ -580,12 +581,12 @@ export function NewOrderForm({
                   {metaCampaignOptions.length === 0 ? (
                     <p className="text-muted-foreground text-xs">
                       No campaigns in the database. Open{" "}
-                      <a
+                      <Link
                         className="text-foreground underline underline-offset-2"
                         href="/campaigns"
                       >
                         Campaigns
-                      </a>{" "}
+                      </Link>{" "}
                       and run <strong>Sync from Meta</strong> first.
                     </p>
                   ) : (

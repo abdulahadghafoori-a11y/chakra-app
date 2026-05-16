@@ -1,6 +1,7 @@
 /**
- * Meta Marketing (Graph) API — ad account structure + insights.
- * Token: META_ACCESS_TOKEN (needs ads_read). Ad account: META_AD_ACCOUNT_ID (with or without act_ prefix).
+ * Meta Marketing (Graph) API — ad account structure + insights + activities.
+ * Token: META_ACCESS_TOKEN (`ads_read` covers Insights and Ad Account `/activities`).
+ * Ad account: META_AD_ACCOUNT_ID (with or without act_ prefix).
  */
 
 const DEFAULT_GRAPH_VERSION = "v22.0";
@@ -203,6 +204,37 @@ export async function fetchCampaignById(
     fields: "id,name,status,effective_status,objective",
   });
   return r;
+}
+
+/** Row from `GET act_{AD_ACCOUNT_ID}/activities` (Marketing API activity log). */
+export type MetaMarketingActivityNode = {
+  actor_id?: string;
+  actor_name?: string;
+  application_name?: string;
+  date_time_in_timezone?: string;
+  event_time?: string;
+  event_type?: string;
+  extra_data?: string | Record<string, unknown>;
+  object_id?: string;
+  object_name?: string;
+  object_type?: string;
+  translated_event_type?: string;
+};
+
+const META_ACTIVITIES_FIELDS =
+  "actor_id,actor_name,application_name,date_time_in_timezone,event_time,event_type,extra_data,object_id,object_name,object_type,translated_event_type";
+
+/**
+ * Paginates all activity rows Meta returns for the ad account (typically ~recent window — see Meta docs).
+ * Uses Graph pagination (`paging.next`) via {@link graphGetPaged}.
+ */
+export async function fetchAdAccountActivities(
+  actId: string,
+): Promise<MetaMarketingActivityNode[]> {
+  return graphGetPaged<MetaMarketingActivityNode>(`${actId}/activities`, {
+    fields: META_ACTIVITIES_FIELDS,
+    limit: "100",
+  });
 }
 
 export type InsightAdRow = {

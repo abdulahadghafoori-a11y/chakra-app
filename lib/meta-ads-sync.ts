@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, inArray } from "drizzle-orm";
 
 import {
   adInsightsDaily,
@@ -14,6 +14,12 @@ import {
 } from "@/lib/meta-insights-actions";
 import { parseInsightsFrequencyRaw } from "@/lib/meta-insights-quality";
 import {
+  recordInsightsSyncSummaries,
+  recordMetaAdSetStructureDiff,
+  recordMetaAdStructureDiff,
+  recordMetaCampaignStructureDiff,
+} from "@/lib/campaign-activity";
+import {
   fetchAdById,
   fetchAdInsightsDailyRange,
   fetchAdSetById,
@@ -26,6 +32,7 @@ import {
   type MetaAdSetNode,
   type MetaCampaignNode,
 } from "@/lib/meta-marketing-api";
+import { syncMarketingApiActivities } from "@/lib/meta-marketing-activities-sync";
 
 const nowSync = () => new Date();
 
@@ -157,13 +164,22 @@ export type BulkSyncStats = {
   campaigns: number;
   adSets: number;
   ads: number;
+  marketingActivitiesFetched: number;
+  marketingActivitiesInserted: number;
   errors: string[];
 };
 
 /** Walk ad account and upsert campaigns → ad sets → ads. */
 export async function bulkSyncAdAccountStructure(): Promise<BulkSyncStats> {
   const actId = getMetaAdAccountId();
-  const stats: BulkSyncStats = { campaigns: 0, adSets: 0, ads: 0, errors: [] };
+  const stats: BulkSyncStats = {
+    campaigns: 0,
+    adSets: 0,
+    ads: 0,
+    marketingActivitiesFetched: 0,
+    marketingActivitiesInserted: 0,
+    errors: [],
+  };
   let campaignList: MetaCampaignNode[] = [];
   try {
     campaignList = await fetchCampaignsForAccount(actId);
@@ -174,7 +190,32 @@ export async function bulkSyncAdAccountStructure(): Promise<BulkSyncStats> {
     return stats;
   }
 
+  const campaignIds = campaignList.map((c) => c.id);
+  const existingCampaignRows =
+    campaignIds.length > 0
+      ? await db
+          .select()
+          .from(metaCampaigns)
+          .where(inArray(metaCampaigns.id, campaignIds))
+      : [];
+  const campaignPrevById = new Map(
+    existingCampaignRows.map((r) => [r.id, r]),
+  );
+
+  const adSetsById = new Map<string, ReturnType<typeof mapAdSet>>();
+  const adsById = new Map<string, ReturnType<typeof mapAd>>();
+
   for (const c of campaignList) {
+    try {
+      await recordMetaCampaignStructureDiff({
+        prev: campaignPrevById.get(c.id),
+        next: mapCampaign(c),
+      });
+    } catch (e) {
+      stats.errors.push(
+        `campaign activity ${c.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     try {
       await upsertMetaCampaign(mapCampaign(c));
       stats.campaigns++;
@@ -196,14 +237,7 @@ export async function bulkSyncAdAccountStructure(): Promise<BulkSyncStats> {
       continue;
     }
     for (const a of adsets) {
-      try {
-        await upsertMetaAdSet(mapAdSet(a));
-        stats.adSets++;
-      } catch (e) {
-        stats.errors.push(
-          `adset ${a.id}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
+      adSetsById.set(a.id, mapAdSet(a));
     }
     for (const a of adsets) {
       let ads: MetaAdNode[] = [];
@@ -216,16 +250,75 @@ export async function bulkSyncAdAccountStructure(): Promise<BulkSyncStats> {
         continue;
       }
       for (const ad of ads) {
-        try {
-          await upsertMetaAd(mapAd(ad));
-          stats.ads++;
-        } catch (e) {
-          stats.errors.push(
-            `ad ${ad.id}: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+        adsById.set(ad.id, mapAd(ad));
       }
     }
+  }
+
+  const adSetIds = [...adSetsById.keys()];
+  const existingAdSetRows =
+    adSetIds.length > 0
+      ? await db
+          .select()
+          .from(metaAdSets)
+          .where(inArray(metaAdSets.id, adSetIds))
+      : [];
+  const adSetPrevById = new Map(existingAdSetRows.map((r) => [r.id, r]));
+
+  for (const mapped of adSetsById.values()) {
+    try {
+      await recordMetaAdSetStructureDiff({
+        prev: adSetPrevById.get(mapped.id),
+        next: mapped,
+      });
+    } catch (e) {
+      stats.errors.push(
+        `adset activity ${mapped.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    try {
+      await upsertMetaAdSet(mapped);
+      stats.adSets++;
+    } catch (e) {
+      stats.errors.push(
+        `adset ${mapped.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  const adIds = [...adsById.keys()];
+  const existingAdRows =
+    adIds.length > 0
+      ? await db.select().from(metaAds).where(inArray(metaAds.id, adIds))
+      : [];
+  const adPrevById = new Map(existingAdRows.map((r) => [r.id, r]));
+
+  for (const mapped of adsById.values()) {
+    try {
+      await recordMetaAdStructureDiff({
+        prev: adPrevById.get(mapped.id),
+        next: mapped,
+      });
+    } catch (e) {
+      stats.errors.push(
+        `ad activity ${mapped.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    try {
+      await upsertMetaAd(mapped);
+      stats.ads++;
+    } catch (e) {
+      stats.errors.push(
+        `ad ${mapped.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  const activityResult = await syncMarketingApiActivities(actId);
+  stats.marketingActivitiesFetched = activityResult.fetched;
+  stats.marketingActivitiesInserted = activityResult.inserted;
+  if (activityResult.error) {
+    stats.errors.push(activityResult.error);
   }
 
   return stats;
@@ -354,6 +447,21 @@ export async function syncAdInsightsDailyRange(
 ): Promise<InsightsSyncStats> {
   const actId = getMetaAdAccountId();
   const stats: InsightsSyncStats = { rowsUpserted: 0, errors: [] };
+  const insightsByCampaign = new Map<
+    string,
+    { rowsUpserted: number; adsTouched: Set<string> }
+  >();
+
+  function bumpInsightCampaign(campaignKey: string, adKey: string) {
+    let agg = insightsByCampaign.get(campaignKey);
+    if (!agg) {
+      agg = { rowsUpserted: 0, adsTouched: new Set<string>() };
+      insightsByCampaign.set(campaignKey, agg);
+    }
+    agg.rowsUpserted++;
+    agg.adsTouched.add(adKey);
+  }
+
   let rows: Awaited<ReturnType<typeof fetchAdInsightsDailyRange>> = [];
   try {
     rows = await fetchAdInsightsDailyRange(actId, since, until);
@@ -427,11 +535,32 @@ export async function syncAdInsightsDailyRange(
           },
         });
       stats.rowsUpserted++;
+      bumpInsightCampaign(campaignId, adId);
     } catch (e) {
       stats.errors.push(
         `insight ${adId} ${day}: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
+  }
+
+  try {
+    await recordInsightsSyncSummaries({
+      sinceDay: since,
+      untilDay: until,
+      byCampaign: new Map(
+        [...insightsByCampaign.entries()].map(([cid, v]) => [
+          cid,
+          {
+            rowsUpserted: v.rowsUpserted,
+            adsTouched: v.adsTouched.size,
+          },
+        ]),
+      ),
+    });
+  } catch (e) {
+    stats.errors.push(
+      `insights activity log: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   return stats;

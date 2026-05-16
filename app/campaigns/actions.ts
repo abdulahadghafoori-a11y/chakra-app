@@ -31,14 +31,14 @@ export async function syncCampaignsFromMetaAction(
   assertValidCampaignInsightRange(sinceDay, untilDay);
   const structure = await bulkSyncAdAccountStructure();
   const insights = await syncAdInsightsDailyRange(sinceDay, untilDay);
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   return { structure, insights };
 }
 
 export async function syncMetaStructureAction() {
   await assertStaffSession();
   const stats = await bulkSyncAdAccountStructure();
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   return stats;
 }
 
@@ -57,7 +57,7 @@ export async function syncMetaInsightsAction(days: number) {
   const sinceDay = start.toISOString().slice(0, 10);
   assertValidCampaignInsightRange(sinceDay, untilDay);
   const stats = await syncAdInsightsDailyRange(sinceDay, untilDay);
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   return stats;
 }
 

@@ -168,6 +168,210 @@ export async function rollupCtwaSessionsByCampaign(
   return m;
 }
 
+/** CTWA sessions in the window, grouped by Meta ad within one campaign. */
+export async function rollupCtwaSessionsByAdForCampaign(
+  metaCampaignId: string,
+  sinceIso: string,
+  untilIso: string,
+): Promise<Map<string, number>> {
+  const since = new Date(sinceIso);
+  const until = new Date(untilIso);
+  const rows = await db
+    .select({
+      metaAdId: ctwaSessions.metaAdId,
+      sessionsCount: sql<number>`count(${ctwaSessions.id})::int`,
+    })
+    .from(ctwaSessions)
+    .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+    .where(
+      and(
+        eq(metaAds.metaCampaignId, metaCampaignId),
+        isNotNull(ctwaSessions.metaAdId),
+        gte(ctwaSessions.sendTime, since),
+        lte(ctwaSessions.sendTime, until),
+      ),
+    )
+    .groupBy(ctwaSessions.metaAdId);
+
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    if (r.metaAdId) m.set(r.metaAdId, r.sessionsCount);
+  }
+  return m;
+}
+
+/** App order aggregates attributed via CTWA to a specific ad (manual orders have no ad id). */
+export type AdAttributedOrderAgg = {
+  ordersCount: number;
+  paidOrdersCount: number;
+  pendingOrdersCount: number;
+  confirmedOrdersCount: number;
+  shippedOrdersCount: number;
+  cancelledOrdersCount: number;
+  returnedOrdersCount: number;
+  totalRevenue: number;
+  paidRevenue: number;
+  convertedOrdersCount: number;
+  convertedRevenue: number;
+  capiSentCount: number;
+};
+
+export async function rollupAttributedOrdersAggByAdForCampaign(
+  metaCampaignId: string,
+  sinceIso: string,
+  untilIso: string,
+): Promise<Map<string, AdAttributedOrderAgg>> {
+  const since = new Date(sinceIso);
+  const until = new Date(untilIso);
+
+  const rows = await db
+    .select({
+      metaAdId: metaAds.id,
+      ordersCount: sql<number>`count(${orders.id})::int`,
+      paidOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'paid')::int`,
+      pendingOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'pending')::int`,
+      confirmedOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'confirmed')::int`,
+      shippedOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'shipped')::int`,
+      cancelledOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'cancelled')::int`,
+      returnedOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} = 'returned')::int`,
+      totalRevenue:
+        sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      paidRevenue:
+        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
+      convertedOrdersCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
+      convertedRevenue:
+        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      capiSentCount:
+        sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
+    })
+    .from(orders)
+    .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
+    .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+    .where(
+      and(
+        eq(metaAds.metaCampaignId, metaCampaignId),
+        isNotNull(ctwaSessions.metaAdId),
+        gte(orders.orderEventAt, since),
+        lte(orders.orderEventAt, until),
+      ),
+    )
+    .groupBy(metaAds.id);
+
+  const m = new Map<string, AdAttributedOrderAgg>();
+  for (const r of rows) {
+    m.set(r.metaAdId, {
+      ordersCount: r.ordersCount,
+      paidOrdersCount: r.paidOrdersCount,
+      pendingOrdersCount: r.pendingOrdersCount,
+      confirmedOrdersCount: r.confirmedOrdersCount,
+      shippedOrdersCount: r.shippedOrdersCount,
+      cancelledOrdersCount: r.cancelledOrdersCount,
+      returnedOrdersCount: r.returnedOrdersCount,
+      totalRevenue: num(r.totalRevenue),
+      paidRevenue: num(r.paidRevenue),
+      convertedOrdersCount: r.convertedOrdersCount,
+      convertedRevenue: num(r.convertedRevenue),
+      capiSentCount: r.capiSentCount,
+    });
+  }
+  return m;
+}
+
+export async function rollupLineCogsByAdForCampaign(
+  metaCampaignId: string,
+  sinceIso: string,
+  untilIso: string,
+): Promise<
+  Map<
+    string,
+    {
+      totalLineCogs: number;
+      paidLineCogs: number;
+      convertedLineCogs: number;
+    }
+  >
+> {
+  const since = new Date(sinceIso);
+  const until = new Date(untilIso);
+
+  const rows = await db
+    .select({
+      metaAdId: metaAds.id,
+      totalLineCogs:
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric), 0)::text`,
+      paidLineCogs:
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
+      convertedLineCogs:
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orderItems.orderId, orders.id))
+    .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
+    .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+    .where(
+      and(
+        eq(metaAds.metaCampaignId, metaCampaignId),
+        isNotNull(ctwaSessions.metaAdId),
+        gte(orders.orderEventAt, since),
+        lte(orders.orderEventAt, until),
+      ),
+    )
+    .groupBy(metaAds.id);
+
+  const m = new Map<
+    string,
+    { totalLineCogs: number; paidLineCogs: number; convertedLineCogs: number }
+  >();
+  for (const r of rows) {
+    m.set(r.metaAdId, {
+      totalLineCogs: num(r.totalLineCogs),
+      paidLineCogs: num(r.paidLineCogs),
+      convertedLineCogs: num(r.convertedLineCogs),
+    });
+  }
+  return m;
+}
+
+export async function rollupPaidOperationalCostsByAdForCampaign(
+  metaCampaignId: string,
+  sinceIso: string,
+  untilIso: string,
+): Promise<Map<string, number>> {
+  const since = new Date(sinceIso);
+  const until = new Date(untilIso);
+
+  const feeRows = await db
+    .select({
+      metaAdId: metaAds.id,
+      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+    })
+    .from(orders)
+    .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
+    .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+    .where(
+      and(
+        eq(metaAds.metaCampaignId, metaCampaignId),
+        isNotNull(ctwaSessions.metaAdId),
+        gte(orders.orderEventAt, since),
+        lte(orders.orderEventAt, until),
+      ),
+    )
+    .groupBy(metaAds.id);
+
+  const m = new Map<string, number>();
+  for (const r of feeRows) {
+    m.set(r.metaAdId, num(r.fees));
+  }
+  return m;
+}
+
 /** Sum impressions + clicks by campaign from daily ad insights. */
 export async function rollupAdInsightsDeliveryByCampaign(
   sinceDay: string,
@@ -665,13 +869,15 @@ export async function rollupMetaAttributedActionsByCampaign(
   return m;
 }
 
-type DayEconomy = {
+export type DayEconomy = {
   convertedRevenue: number;
   convertedCogs: number;
   deliveryCost: number;
+  /** Distinct orders attributed to this campaign on this UTC day (ctwa + manual). */
+  ordersCount: number;
 };
 
-function listUtcDaysInclusive(sinceDay: string, untilDay: string): string[] {
+export function listUtcDaysInclusive(sinceDay: string, untilDay: string): string[] {
   const out: string[] = [];
   let d = sinceDay;
   for (let i = 0; i < 400; i++) {
@@ -691,7 +897,7 @@ function populationCvOfDailyNet(values: number[]): number | null {
   return Math.sqrt(varPop) / Math.abs(mean);
 }
 
-async function rollupSpendByCampaignByDay(
+export async function rollupSpendByCampaignByDay(
   sinceDay: string,
   untilDay: string,
 ): Promise<Map<string, Map<string, number>>> {
@@ -724,7 +930,7 @@ async function rollupSpendByCampaignByDay(
   return m;
 }
 
-function mergeDayEconomyMaps(
+export function mergeDayEconomyMaps(
   ctwa: Map<string, Map<string, DayEconomy>>,
   manual: Map<string, Map<string, DayEconomy>>,
 ): Map<string, Map<string, DayEconomy>> {
@@ -736,11 +942,13 @@ function mergeDayEconomyMaps(
         convertedRevenue: 0,
         convertedCogs: 0,
         deliveryCost: 0,
+        ordersCount: 0,
       };
       ex.set(day, {
         convertedRevenue: cur.convertedRevenue + econ.convertedRevenue,
         convertedCogs: cur.convertedCogs + econ.convertedCogs,
         deliveryCost: cur.deliveryCost + econ.deliveryCost,
+        ordersCount: cur.ordersCount + econ.ordersCount,
       });
     }
     out.set(cid, ex);
@@ -748,7 +956,7 @@ function mergeDayEconomyMaps(
   return out;
 }
 
-async function rollupConvertedEconomyByCampaignByDayCtwa(
+export async function rollupConvertedEconomyByCampaignByDayCtwa(
   sinceDay: string,
   untilDay: string,
 ): Promise<Map<string, Map<string, DayEconomy>>> {
@@ -758,6 +966,7 @@ async function rollupConvertedEconomyByCampaignByDayCtwa(
     .select({
       metaCampaignId: metaAds.metaCampaignId,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
+      ordersCount: sql<number>`count(distinct ${orders.id})::int`,
       convertedRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
       convertedCogs:
@@ -786,12 +995,13 @@ async function rollupConvertedEconomyByCampaignByDayCtwa(
       convertedRevenue: num(r.convertedRevenue),
       convertedCogs: num(r.convertedCogs),
       deliveryCost: num(r.deliveryCost),
+      ordersCount: r.ordersCount ?? 0,
     });
   }
   return m;
 }
 
-async function rollupConvertedEconomyByCampaignByDayManual(
+export async function rollupConvertedEconomyByCampaignByDayManual(
   sinceDay: string,
   untilDay: string,
 ): Promise<Map<string, Map<string, DayEconomy>>> {
@@ -801,6 +1011,7 @@ async function rollupConvertedEconomyByCampaignByDayManual(
     .select({
       metaCampaignId: metaCampaigns.id,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
+      ordersCount: sql<number>`count(distinct ${orders.id})::int`,
       convertedRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
       convertedCogs:
@@ -838,6 +1049,7 @@ async function rollupConvertedEconomyByCampaignByDayManual(
       convertedRevenue: num(r.convertedRevenue),
       convertedCogs: num(r.convertedCogs),
       deliveryCost: num(r.deliveryCost),
+      ordersCount: r.ordersCount ?? 0,
     });
   }
   return m;
@@ -877,6 +1089,7 @@ export async function computeDailyNetProfitCvByCampaign(
           convertedRevenue: 0,
           convertedCogs: 0,
           deliveryCost: 0,
+          ordersCount: 0,
         };
       const paidSpend = spend * (1 + fee);
       const commission = e.convertedRevenue * comm;
@@ -1130,6 +1343,141 @@ export async function rollupCampaignMetaEngagementSignals(
     }
 
     out.set(cid, {
+      weeklyAvgFrequency,
+      firstImpressionShare,
+      qualityRankingScore0to1,
+      qualityRankingLowStreakDays,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Trailing 7 UTC days ending `untilDay`, per ad within a campaign (impression-weighted).
+ */
+export async function rollupAdMetaEngagementSignalsForCampaign(
+  metaCampaignId: string,
+  untilDay: string,
+  minQualityRankScore: number,
+): Promise<Map<string, CampaignMetaEngagementSignals>> {
+  const since7 = addUtcDaysToDateOnly(untilDay, -6);
+  const days: string[] = [];
+  {
+    let d = since7;
+    for (let i = 0; i < 400; i++) {
+      days.push(d);
+      if (d === untilDay) break;
+      d = addUtcDaysToDateOnly(d, 1);
+    }
+  }
+
+  const rows = await db
+    .select({
+      metaAdId: adInsightsDaily.metaAdId,
+      insightDate: adInsightsDaily.insightDate,
+      impressions: adInsightsDaily.impressions,
+      frequency: adInsightsDaily.frequency,
+      qualityRanking: adInsightsDaily.qualityRanking,
+      firstTimeImpressionRatio: adInsightsDaily.firstTimeImpressionRatio,
+    })
+    .from(adInsightsDaily)
+    .where(
+      and(
+        eq(adInsightsDaily.metaCampaignId, metaCampaignId),
+        gte(adInsightsDaily.insightDate, since7),
+        lte(adInsightsDaily.insightDate, untilDay),
+      ),
+    );
+
+  type Acc = {
+    freqNum: number;
+    freqDen: number;
+    firNum: number;
+    firDen: number;
+    qualNum: number;
+    qualDen: number;
+    byDay: Map<
+      string,
+      { qualNum: number; qualDen: number }
+    >;
+  };
+
+  const byAd = new Map<string, Acc>();
+
+  for (const r of rows) {
+    const aid = r.metaAdId;
+    const imps = r.impressions;
+    if (imps <= 0) continue;
+
+    let acc = byAd.get(aid);
+    if (!acc) {
+      acc = {
+        freqNum: 0,
+        freqDen: 0,
+        firNum: 0,
+        firDen: 0,
+        qualNum: 0,
+        qualDen: 0,
+        byDay: new Map(),
+      };
+      byAd.set(aid, acc);
+    }
+
+    const f = r.frequency != null ? num(r.frequency) : null;
+    if (f != null && Number.isFinite(f)) {
+      acc.freqNum += imps * f;
+      acc.freqDen += imps;
+    }
+
+    const fir =
+      r.firstTimeImpressionRatio != null
+        ? num(r.firstTimeImpressionRatio)
+        : null;
+    if (fir != null && Number.isFinite(fir)) {
+      acc.firNum += imps * fir;
+      acc.firDen += imps;
+    }
+
+    const q = metaQualityRankingToScore0to1(r.qualityRanking);
+    if (q != null) {
+      acc.qualNum += imps * q;
+      acc.qualDen += imps;
+      let dayAcc = acc.byDay.get(r.insightDate);
+      if (!dayAcc) {
+        dayAcc = { qualNum: 0, qualDen: 0 };
+        acc.byDay.set(r.insightDate, dayAcc);
+      }
+      dayAcc.qualNum += imps * q;
+      dayAcc.qualDen += imps;
+    }
+  }
+
+  const out = new Map<string, CampaignMetaEngagementSignals>();
+  for (const [aid, acc] of byAd) {
+    const weeklyAvgFrequency =
+      acc.freqDen > 0 ? acc.freqNum / acc.freqDen : null;
+    const firstImpressionShare =
+      acc.firDen > 0 ? acc.firNum / acc.firDen : null;
+    const qualityRankingScore0to1 =
+      acc.qualDen > 0 ? acc.qualNum / acc.qualDen : null;
+
+    let qualityRankingLowStreakDays: number | null = null;
+    if (acc.qualDen > 0) {
+      let streak = 0;
+      for (let i = days.length - 1; i >= 0; i--) {
+        const day = days[i]!;
+        const da = acc.byDay.get(day);
+        const dailyQ =
+          da != null && da.qualDen > 0 ? da.qualNum / da.qualDen : null;
+        if (dailyQ == null) break;
+        if (dailyQ < minQualityRankScore) streak++;
+        else break;
+      }
+      qualityRankingLowStreakDays = streak > 0 ? streak : null;
+    }
+
+    out.set(aid, {
       weeklyAvgFrequency,
       firstImpressionShare,
       qualityRankingScore0to1,

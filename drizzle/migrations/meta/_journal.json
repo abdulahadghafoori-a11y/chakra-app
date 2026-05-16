@@ -232,6 +232,20 @@
       "when": 1776563965100,
       "tag": "0032_orders_order_event_at_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1776563965200,
+      "tag": "0033_campaign_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1776563965300,
+      "tag": "0034_meta_marketing_activities",
+      "breakpoints": true
     }
   ]
 }
