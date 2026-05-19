@@ -2,7 +2,7 @@
 
 import { desc, eq } from "drizzle-orm";
 
-import { contacts, ctwaSessions } from "@/drizzle/schema";
+import { contacts, ctwaSessions, metaAds, metaCampaigns } from "@/drizzle/schema";
 import { db } from "@/lib/db";
 import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 
@@ -17,6 +17,8 @@ export type CtwaSessionRow = {
   sourceUrl: string | null;
   sourceType: string | null;
   sendTime: string;
+  metaCampaignId: string | null;
+  campaignName: string | null;
 };
 
 export async function getCtwaSessionsByPhone(
@@ -37,9 +39,13 @@ export async function getCtwaSessionsByPhone(
       sourceUrl: ctwaSessions.sourceUrl,
       sourceType: ctwaSessions.sourceType,
       sendTime: ctwaSessions.sendTime,
+      metaCampaignId: metaCampaigns.id,
+      campaignName: metaCampaigns.name,
     })
     .from(ctwaSessions)
     .innerJoin(contacts, eq(ctwaSessions.contactId, contacts.id))
+    .leftJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+    .leftJoin(metaCampaigns, eq(metaAds.metaCampaignId, metaCampaigns.id))
     .where(eq(contacts.phoneNumber, phoneKey))
     .orderBy(desc(ctwaSessions.sendTime));
 
@@ -54,5 +60,7 @@ export async function getCtwaSessionsByPhone(
     sourceUrl: r.sourceUrl,
     sourceType: r.sourceType,
     sendTime: r.sendTime.toISOString(),
+    metaCampaignId: r.metaCampaignId,
+    campaignName: r.campaignName,
   }));
 }

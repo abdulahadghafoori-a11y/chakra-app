@@ -16,6 +16,7 @@ import { createOrder, previewOrderCapiPayload } from "@/actions/order";
 import type { CtwaSessionRow } from "@/actions/ctwa";
 import { getCtwaSessionsByPhone } from "@/actions/ctwa";
 import type { ProductRow } from "@/actions/products";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -100,6 +101,37 @@ type ContactPhase =
 function sessionTriggerLabel(s: CtwaSessionRow): string {
   const clid = s.ctwaClid?.slice(0, 12) ?? "—";
   return `${clid}… · ${formatDateTimeKabul(s.sendTime)}`;
+}
+
+function sessionOptionLabel(s: CtwaSessionRow): string {
+  return `${sessionTriggerLabel(s)} · ${summarizeCtwaSessionLabel(s)}`;
+}
+
+function CtwaSessionAttributionFooter({
+  session,
+}: {
+  session: CtwaSessionRow | undefined;
+}) {
+  if (!session) return null;
+  return (
+    <>
+      <p className="text-muted-foreground text-xs">
+        Campaign:{" "}
+        <span className="text-foreground font-medium">
+          {session.campaignName?.trim() ||
+            "— (not linked to a synced campaign)"}
+        </span>
+      </p>
+      {session.wabaId ? (
+        <p className="text-muted-foreground font-mono text-xs">
+          WABA {session.wabaId}
+          {session.phoneNumberId
+            ? ` · phone_number_id ${session.phoneNumberId}`
+            : null}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 function defaultLine(products: ProductRow[], fxValid: boolean, afnPerUsd: number) {
@@ -193,6 +225,13 @@ export function NewOrderForm({
   const latestSession = useMemo(
     () => (sessions.length > 0 ? sessions[0] : undefined),
     [sessions],
+  );
+
+  const ctwaSessionId = form.watch("ctwaSessionId");
+  const selectedSession = useMemo(
+    () =>
+      sessions.find((s) => s.id === ctwaSessionId) ?? latestSession,
+    [sessions, ctwaSessionId, latestSession],
   );
 
   useEffect(() => {
@@ -302,7 +341,7 @@ export function NewOrderForm({
     if (!reviewValues) return null;
     const ctwaSession = reviewValues.ctwaSessionId
       ? sessions.find((s) => s.id === reviewValues.ctwaSessionId)
-      : sessions[0];
+      : undefined;
     const lineRows = reviewValues.lines.map((line, i) => {
       const p = products.find((x) => x.id === line.productId);
       const unitAfn = roundAfnWhole(line.unitSalePrice);
@@ -486,8 +525,8 @@ export function NewOrderForm({
         <CardTitle className="text-lg sm:text-xl">New order</CardTitle>
         <CardDescription className="text-pretty leading-relaxed">
           The phone must match a contact already in the system (from WhatsApp).
-          When creating as Confirmed/Paid we send Meta Purchase using the latest
-          session when available (better{" "}
+          When creating as Confirmed/Paid we send Meta Purchase using the chosen
+          CTWA session (defaults to latest when there are several). Better{" "}
           <code className="text-xs">ctwa_clid</code>&nbsp;matching); without it we
           still send using phone + WhatsApp identifiers. You review the payload
           before the order is created.
@@ -537,31 +576,74 @@ export function NewOrderForm({
                   name="ctwaSessionId"
                   render={({ field }) => (
                     <FormItem className="min-w-0">
-                      <FormLabel>CTWA session (latest)</FormLabel>
-                      <input type="hidden" {...field} />
-                      <FormControl>
-                        <Input
-                          readOnly
-                          tabIndex={-1}
-                          className="h-10 min-h-10 w-full min-w-0 max-w-full cursor-default bg-muted/50 font-mono text-sm sm:h-9 sm:min-h-0"
+                      <FormLabel>
+                        CTWA session
+                        {sessions.length > 1 ? (
+                          <span className="text-muted-foreground font-normal">
+                            {" "}
+                            ({sessions.length} for this contact)
+                          </span>
+                        ) : null}
+                      </FormLabel>
+                      {sessions.length > 1 ? (
+                        <Select
+                          value={field.value || undefined}
+                          onValueChange={field.onChange}
                           disabled={loadingPhoneData}
-                          value={
-                            latestSession
-                              ? `${sessionTriggerLabel(latestSession)} · ${summarizeCtwaSessionLabel(latestSession)}`
-                              : loadingPhoneData
-                                ? "…"
-                                : "No session for this number"
-                          }
-                        />
-                      </FormControl>
-                      {latestSession?.wabaId ? (
-                        <p className="text-muted-foreground font-mono text-xs">
-                          WABA {latestSession.wabaId}
-                          {latestSession.phoneNumberId
-                            ? ` · phone_number_id ${latestSession.phoneNumberId}`
-                            : null}
-                        </p>
-                      ) : null}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="h-auto min-h-10 w-full min-w-0 py-2 font-mono text-sm sm:min-h-9">
+                              <SelectValue placeholder="Choose CTWA session">
+                                {selectedSession
+                                  ? sessionOptionLabel(selectedSession)
+                                  : loadingPhoneData
+                                    ? "Loading…"
+                                    : "Choose session"}
+                              </SelectValue>
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="max-w-[min(100vw-2rem,28rem)]">
+                            {sessions.map((s, index) => (
+                              <SelectItem
+                                key={s.id}
+                                value={s.id}
+                                className="items-start py-2"
+                              >
+                                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                  {index === 0 ? (
+                                    <Badge
+                                      variant="secondary"
+                                      className="shrink-0 px-1.5 py-0 text-[10px] font-semibold uppercase"
+                                    >
+                                      Latest
+                                    </Badge>
+                                  ) : null}
+                                  <span className="font-mono text-xs leading-snug">
+                                    {sessionOptionLabel(s)}
+                                  </span>
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FormControl>
+                          <Input
+                            readOnly
+                            tabIndex={-1}
+                            className="h-10 min-h-10 w-full min-w-0 max-w-full cursor-default bg-muted/50 font-mono text-sm sm:h-9 sm:min-h-0"
+                            disabled={loadingPhoneData}
+                            value={
+                              latestSession
+                                ? sessionOptionLabel(latestSession)
+                                : loadingPhoneData
+                                  ? "…"
+                                  : "No session for this number"
+                            }
+                          />
+                        </FormControl>
+                      )}
+                      <CtwaSessionAttributionFooter session={selectedSession} />
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1154,9 +1236,18 @@ export function NewOrderForm({
                             <dt className="text-muted-foreground">CTWA session</dt>
                             <dd>
                               {reviewSummary.ctwaSession
-                                ? `${sessionTriggerLabel(reviewSummary.ctwaSession)} · ${summarizeCtwaSessionLabel(reviewSummary.ctwaSession)}`
+                                ? sessionOptionLabel(reviewSummary.ctwaSession)
                                 : "No session — CAPI without ctwa_clid"}
                             </dd>
+                            {reviewSummary.ctwaSession ? (
+                              <dd className="text-muted-foreground mt-1 text-xs">
+                                Campaign:{" "}
+                                <span className="text-foreground font-medium">
+                                  {reviewSummary.ctwaSession.campaignName?.trim() ||
+                                    "— (not linked to a synced campaign)"}
+                                </span>
+                              </dd>
+                            ) : null}
                           </div>
                           {reviewSummary.ctwaSession?.wabaId ? (
                             <div className="min-w-0 sm:col-span-2">
