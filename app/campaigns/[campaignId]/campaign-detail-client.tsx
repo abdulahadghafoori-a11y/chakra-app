@@ -6,6 +6,10 @@ import { useMemo } from "react";
 
 import { ClientTablePagination } from "@/components/client-table-pagination";
 import { CampaignInsightsToolbar } from "@/components/campaign-insights-toolbar";
+import {
+  CAMPAIGN_FULFILLED_ORDERS_HINT,
+  formatCodFulfilledSubline,
+} from "@/lib/campaign-order-counts";
 import { useClientTablePage } from "@/hooks/use-client-table-page";
 import type {
   CampaignAdBreakdownRow,
@@ -366,7 +370,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
             <p className="text-muted-foreground mt-1 text-xs">
               {props.attributionSplit.ctwa.ordersCount} orders (excl. cancelled/
               returned) · {props.attributionSplit.ctwa.convertedOrdersCount}{" "}
-              converted (paid, confirmed, shipped)
+              fulfilled (COD)
             </p>
           </div>
           <div className="rounded-lg border p-4">
@@ -379,8 +383,8 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
             <p className="text-muted-foreground mt-1 text-xs">
               {props.attributionSplit.manual.ordersCount} orders (excl.
               cancelled/returned) ·{" "}
-              {props.attributionSplit.manual.convertedOrdersCount} converted
-              (paid, confirmed, shipped)
+              {props.attributionSplit.manual.convertedOrdersCount} fulfilled
+              (COD)
             </p>
           </div>
         </CardContent>
@@ -390,8 +394,8 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
         <CardHeader>
           <CardTitle className="text-base">Daily performance (UTC)</CardTitle>
           <CardDescription>
-            Merged Meta Insights rows with app economics (converted revenue uses paid,
-            confirmed, and shipped).
+            Merged Meta Insights rows with app economics (fulfilled revenue: paid or
+            confirmed/shipped on COD).
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -589,10 +593,10 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                       </span>
                       <span
                         className="text-muted-foreground font-normal"
-                        title="Converted (paid, confirmed, shipped)"
+                        title={CAMPAIGN_FULFILLED_ORDERS_HINT}
                       >
-                        {a.convertedOrdersCount} conv. ({a.paidOrdersCount} paid
-                        · {a.confirmedOrdersCount} conf.)
+                        {a.convertedOrdersCount} fulfilled (
+                        {formatCodFulfilledSubline(a)})
                       </span>
                       <span
                         className="text-muted-foreground"

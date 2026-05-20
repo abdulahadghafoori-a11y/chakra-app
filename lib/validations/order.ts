@@ -14,9 +14,14 @@ export const orderStatuses = [
 
 export const APP_CURRENCY = "USD" as const;
 
-/** Purchase CAPI only when order reaches one of these statuses (create or staff update). */
+/**
+ * Purchase CAPI when order is far enough along for COD (confirmed, out for delivery, or paid).
+ * Shipped is included because payment is on delivery — same practical step as confirmed.
+ */
 export function orderStatusEligibleForPurchaseCapi(status: string): boolean {
-  return status === "confirmed" || status === "paid";
+  return (
+    status === "confirmed" || status === "paid" || status === "shipped"
+  );
 }
 
 const ctwaSessionIdField = z.union([

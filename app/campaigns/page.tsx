@@ -58,6 +58,9 @@ export default async function CampaignsPage({
         r.metaMessagingConversationsStarted,
       ordersCount: acc.ordersCount + r.ordersCount,
       paidOrdersCount: acc.paidOrdersCount + r.paidOrdersCount,
+      confirmedOrdersCount:
+        acc.confirmedOrdersCount + r.confirmedOrdersCount,
+      shippedOrdersCount: acc.shippedOrdersCount + r.shippedOrdersCount,
       convertedOrdersCount: acc.convertedOrdersCount + r.convertedOrdersCount,
       metaPurchases: acc.metaPurchases + r.metaPurchases,
       convertedRevenue: acc.convertedRevenue + r.convertedRevenue,
@@ -75,6 +78,8 @@ export default async function CampaignsPage({
       metaMessagingConversationsStarted: 0,
       ordersCount: 0,
       paidOrdersCount: 0,
+      confirmedOrdersCount: 0,
+      shippedOrdersCount: 0,
       convertedOrdersCount: 0,
       metaPurchases: 0,
       convertedRevenue: 0,
@@ -93,8 +98,9 @@ export default async function CampaignsPage({
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           COD cockpit: <strong>app</strong> CTWA sessions and attributed{" "}
           <strong>orders</strong> (pending, confirmed, shipped, paid — not
-          cancelled or returned) for volume; <strong>converted</strong> (paid +
-          confirmed, shipped) drives revenue and P&amp;L. Money uses <strong>{APP_CURRENCY}</strong> (
+          cancelled or returned) for volume; <strong>fulfilled</strong> (paid or
+          confirmed/shipped — same COD step) drives revenue and P&amp;L. Money uses{" "}
+          <strong>{APP_CURRENCY}</strong> (
           <code className="bg-muted rounded px-1">APP_CURRENCY</code>). Set{" "}
           <strong>card surcharge</strong> on Meta Insights spend (<code className="bg-muted rounded px-1">
             fee_pct

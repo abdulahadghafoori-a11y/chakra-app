@@ -147,6 +147,7 @@ export type CampaignAdBreakdownRow = {
   paidOrdersCount: number;
   pendingOrdersCount: number;
   confirmedOrdersCount: number;
+  shippedOrdersCount: number;
   convertedOrdersCount: number;
   convertedRevenue: number;
   grossProfitPaid: number;
@@ -688,6 +689,7 @@ export async function getCampaignAdBreakdown(
       paidOrdersCount: o.paidOrdersCount,
       pendingOrdersCount: o.pendingOrdersCount,
       confirmedOrdersCount: o.confirmedOrdersCount,
+      shippedOrdersCount: o.shippedOrdersCount,
       convertedOrdersCount: o.convertedOrdersCount,
       convertedRevenue: o.convertedRevenue,
       grossProfitPaid: verdictDetail.grossProfitPaid,

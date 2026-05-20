@@ -540,7 +540,7 @@ export function NewOrderForm({
         <CardTitle className="text-lg sm:text-xl">New order</CardTitle>
         <CardDescription className="text-pretty leading-relaxed">
           The phone must match a contact already in the system (from WhatsApp).
-          When creating as Confirmed/Paid we send Meta Purchase using the chosen
+          When creating as Confirmed, Shipped, or Paid we send Meta Purchase using the chosen
           CTWA session (defaults to latest when there are several). Better{" "}
           <code className="text-xs">ctwa_clid</code>&nbsp;matching); without it we
           still send using phone + WhatsApp identifiers. You review the payload

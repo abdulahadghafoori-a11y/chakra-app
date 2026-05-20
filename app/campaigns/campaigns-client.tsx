@@ -54,6 +54,11 @@ import {
   type CampaignTableColumnId,
 } from "@/lib/campaign-table-columns";
 import type { CampaignVerdict } from "@/lib/campaign-verdict";
+import {
+  CAMPAIGN_FULFILLED_ORDERS_HINT,
+  CAMPAIGN_FULFILLED_ORDERS_LABEL,
+  formatCodFulfilledSubline,
+} from "@/lib/campaign-order-counts";
 import type {
   CampaignPerformanceRow,
   MetaCampaignTreeCampaign,
@@ -82,6 +87,8 @@ type Totals = {
   metaMessagingConversationsStarted: number;
   ordersCount: number;
   paidOrdersCount: number;
+  confirmedOrdersCount: number;
+  shippedOrdersCount: number;
   convertedOrdersCount: number;
   metaPurchases: number;
   convertedRevenue: number;
@@ -368,8 +375,8 @@ export function CampaignsClient({
             </CardTitle>
             <p className="text-muted-foreground text-xs font-normal leading-snug">
               Pending, confirmed, shipped, and paid — excludes cancelled and
-              returned. Converted (paid, confirmed, shipped):{" "}
-              {totals.convertedOrdersCount}
+              returned. {CAMPAIGN_FULFILLED_ORDERS_LABEL}:{" "}
+              {totals.convertedOrdersCount} ({formatCodFulfilledSubline(totals)})
               · Paid only: {totals.paidOrdersCount} · Meta purchases (Insights,
               diagnostic): {totals.metaPurchases}
             </p>
@@ -377,7 +384,7 @@ export function CampaignsClient({
         </Card>
         <Card className="py-3">
           <CardHeader className="px-4 pb-1 pt-0">
-            <CardDescription>Converted revenue</CardDescription>
+            <CardDescription>Fulfilled revenue (COD)</CardDescription>
             <CardTitle className="text-lg tabular-nums">
               {formatMoney(totals.convertedRevenue)}
             </CardTitle>
@@ -597,7 +604,7 @@ export function CampaignsClient({
                   <TableHead className="text-right">
                     <span className="block leading-tight">Orders</span>
                     <span className="text-muted-foreground block text-[10px] font-normal normal-case">
-                      excl. cancelled/returned
+                      fulfilled = COD pre-delivery
                     </span>
                   </TableHead>
                   ) : null}
@@ -812,14 +819,10 @@ export function CampaignsClient({
                             </span>
                             <span
                               className="text-muted-foreground font-normal"
-                              title="Converted orders (paid, confirmed, shipped) for P&amp;L"
+                              title={CAMPAIGN_FULFILLED_ORDERS_HINT}
                             >
-                              {r.convertedOrdersCount} conv. ({r.paidOrdersCount}{" "}
-                              paid · {r.confirmedOrdersCount} conf.
-                              {r.shippedOrdersCount > 0
-                                ? ` · ${r.shippedOrdersCount} shipped`
-                                : ""}
-                              )
+                              {r.convertedOrdersCount} fulfilled (
+                              {formatCodFulfilledSubline(r)})
                             </span>
                             <span
                               className="text-muted-foreground"
