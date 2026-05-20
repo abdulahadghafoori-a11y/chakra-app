@@ -4,7 +4,9 @@ import Link from "next/link";
 
 import { useMemo } from "react";
 
+import { ClientTablePagination } from "@/components/client-table-pagination";
 import { CampaignInsightsToolbar } from "@/components/campaign-insights-toolbar";
+import { useClientTablePage } from "@/hooks/use-client-table-page";
 import type {
   CampaignAdBreakdownRow,
   CampaignDailyPerformanceRow,
@@ -185,6 +187,11 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
       }),
     [props.activity, props.campaignId, props.campaignName],
   );
+
+  const dailyPage = useClientTablePage(props.daily);
+  const adsPage = useClientTablePage(props.adsBreakdown);
+  const ordersPage = useClientTablePage(props.attributedOrders);
+  const activityPage = useClientTablePage(presentedActivity);
 
   const title =
     props.campaignName?.trim() ||
@@ -400,7 +407,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {props.daily.map((d) => (
+              {dailyPage.pageRows.map((d) => (
                 <TableRow key={d.day}>
                   <TableCell className="font-mono text-xs">{d.day}</TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -439,6 +446,14 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
             * Frequency / quality are impression-weighted within each UTC day from synced{" "}
             <code className="text-[10px]">ad_insights_daily</code>.
           </p>
+          <ClientTablePagination
+            page={dailyPage.page}
+            pageCount={dailyPage.pageCount}
+            total={dailyPage.total}
+            itemLabel="days"
+            onPageChange={dailyPage.setPage}
+            className="mt-3"
+          />
         </CardContent>
       </Card>
 
@@ -519,7 +534,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {props.adsBreakdown.map((a) => (
+              {adsPage.pageRows.map((a) => (
                 <TableRow key={a.metaAdId}>
                   <TableCell className="max-w-[14rem] align-top">
                     <div className="truncate text-sm font-medium">
@@ -645,6 +660,16 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               No ad-level Insights in this window yet.
             </p>
           )}
+          {adsPage.total > 0 ? (
+            <ClientTablePagination
+              page={adsPage.page}
+              pageCount={adsPage.pageCount}
+              total={adsPage.total}
+              itemLabel="ads"
+              onPageChange={adsPage.setPage}
+              className="mt-3"
+            />
+          ) : null}
         </CardContent>
       </Card>
 
@@ -652,7 +677,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
         <CardHeader>
           <CardTitle className="text-base">Attributed orders</CardTitle>
           <CardDescription>
-            Newest first (up to 250). “Last buyer CTWA” is the latest WhatsApp referral
+            Newest first. “Last buyer CTWA” is the latest WhatsApp referral
             timestamp for this customer across CTWA sessions.
           </CardDescription>
         </CardHeader>
@@ -670,7 +695,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {props.attributedOrders.map((o) => (
+              {ordersPage.pageRows.map((o) => (
                 <TableRow key={o.orderId}>
                   <TableCell className="font-mono text-xs">
                     <Link
@@ -692,6 +717,14 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               ))}
             </TableBody>
           </Table>
+          <ClientTablePagination
+            page={ordersPage.page}
+            pageCount={ordersPage.pageCount}
+            total={ordersPage.total}
+            itemLabel="orders"
+            onPageChange={ordersPage.setPage}
+            className="mt-3"
+          />
         </CardContent>
       </Card>
 
@@ -754,7 +787,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {presentedActivity.map((row) => (
+                  {activityPage.pageRows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="align-top text-sm">
                         <span className="font-medium">{row.activity}</span>
@@ -779,6 +812,16 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               </p>
             )}
           </div>
+          {activityPage.total > 0 ? (
+            <ClientTablePagination
+              page={activityPage.page}
+              pageCount={activityPage.pageCount}
+              total={activityPage.total}
+              itemLabel="events"
+              onPageChange={activityPage.setPage}
+              className="mt-3"
+            />
+          ) : null}
         </CardContent>
       </Card>
     </div>

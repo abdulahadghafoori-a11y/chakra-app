@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 
 import { contacts, orderItems, orders, products } from "@/drizzle/schema";
 import { formatDateTimeKabul } from "@/lib/kabul-time";
@@ -7,11 +7,15 @@ import {
   formatUsd2,
 } from "@/lib/fx-afn-usd";
 import { db } from "@/lib/db";
+import { resolveTablePage } from "@/lib/table-pagination";
 
 export type OrderTableRow = {
   id: string;
   phone: string;
   contactId: string;
+  status: string;
+  deliveryProvinceAfghanistan: string | null;
+  deliveryTrackingNumber: string | null;
   value: string;
   /** Whole AFN derived from `value` USD + `afn_per_usd_snapshot`; null if no snapshot */
   valueAfn: string | null;
@@ -56,6 +60,48 @@ export function parseOrdersTableSort(
   return "recorded_desc";
 }
 
+/** Kabul when no out-of-Kabul province was saved on the order. */
+export function formatOrderDeliveryAddressLine(row: {
+  deliveryProvinceAfghanistan: string | null;
+}): string {
+  const province = row.deliveryProvinceAfghanistan?.trim();
+  return province || "Kabul";
+}
+
+export function formatOrderStatusLabel(status: string): string {
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+async function orderIdsMatchingProductSearch(term: string): Promise<string[]> {
+  const like = `%${term}%`;
+  const rows = await db
+    .selectDistinct({ orderId: orderItems.orderId })
+    .from(orderItems)
+    .innerJoin(products, eq(orderItems.productId, products.id))
+    .where(ilike(products.name, like));
+  return rows.map((r) => r.orderId);
+}
+
+function buildOrdersSearchCondition(term: string, productOrderIds: string[]) {
+  const like = `%${term}%`;
+  const parts = [
+    ilike(orders.id, like),
+    ilike(contacts.phoneNumber, like),
+    ilike(sql`coalesce(${contacts.name}, '')`, like),
+    ilike(orders.status, like),
+    ilike(sql`coalesce(${orders.deliveryProvinceAfghanistan}, '')`, like),
+    ilike(sql`coalesce(${orders.deliveryTrackingNumber}, '')`, like),
+    ilike(
+      sql`coalesce(nullif(trim(${orders.deliveryProvinceAfghanistan}), ''), 'Kabul')`,
+      like,
+    ),
+  ];
+  if (productOrderIds.length > 0) {
+    parts.push(inArray(orders.id, productOrderIds));
+  }
+  return or(...parts);
+}
+
 function ordersTableOrderBy(sort: OrdersTableSort) {
   switch (sort) {
     case "recorded_desc":
@@ -75,20 +121,90 @@ function ordersTableOrderBy(sort: OrdersTableSort) {
   }
 }
 
+function mapOrderTableRow(r: {
+  id: string;
+  phone: string;
+  contactId: string;
+  status: string;
+  deliveryProvinceAfghanistan: string | null;
+  deliveryTrackingNumber: string | null;
+  value: string | number;
+  afnPerUsdSnapshot: string | null;
+  currency: string;
+  capiSent: boolean;
+  orderEventAt: Date;
+  createdAt: Date;
+}): OrderTableRow {
+  const derived = estimateAfnWholeFromStoredUsd(
+    Number(r.value),
+    r.afnPerUsdSnapshot,
+  );
+  return {
+    id: r.id,
+    phone: r.phone,
+    contactId: r.contactId,
+    status: r.status,
+    deliveryProvinceAfghanistan: r.deliveryProvinceAfghanistan,
+    deliveryTrackingNumber: r.deliveryTrackingNumber,
+    value: String(r.value),
+    valueAfn: derived == null ? null : String(derived),
+    currency: r.currency,
+    capiSent: r.capiSent,
+    orderEventAt: r.orderEventAt,
+    createdAt: r.createdAt,
+  };
+}
+
 /**
  * Orders for a list table (phone, CAPI, totals) with optional contact filter.
  */
 export async function loadOrdersTableRows(options: {
-  limit: number;
+  page: number;
+  pageSize: number;
   filterContactId?: string;
   sort?: OrdersTableSort;
-}): Promise<OrderTableRow[]> {
+  /** Case-insensitive match on order id, phone, contact name, status, delivery, products. */
+  search?: string;
+}): Promise<{ rows: OrderTableRow[]; total: number; page: number }> {
   const sortKey = options.sort ?? "recorded_desc";
-  const base = db
+  const searchTerm = options.search?.trim() ?? "";
+  const productOrderIds =
+    searchTerm.length > 0
+      ? await orderIdsMatchingProductSearch(searchTerm)
+      : [];
+
+  const conditions = [];
+  if (options.filterContactId) {
+    conditions.push(eq(orders.contactId, options.filterContactId));
+  }
+  if (searchTerm.length > 0) {
+    conditions.push(buildOrdersSearchCondition(searchTerm, productOrderIds));
+  }
+  const whereClause = conditions.length ? and(...conditions) : undefined;
+
+  const countBase = db
+    .select({ n: count() })
+    .from(orders)
+    .innerJoin(contacts, eq(orders.contactId, contacts.id));
+  const [countRow] = whereClause
+    ? await countBase.where(whereClause)
+    : await countBase;
+  const total = Number(countRow?.n ?? 0);
+
+  const { page, offset } = resolveTablePage({
+    requestedPage: options.page,
+    total,
+    pageSize: options.pageSize,
+  });
+
+  const listBase = db
     .select({
       id: orders.id,
       phone: contacts.phoneNumber,
       contactId: contacts.id,
+      status: orders.status,
+      deliveryProvinceAfghanistan: orders.deliveryProvinceAfghanistan,
+      deliveryTrackingNumber: orders.deliveryTrackingNumber,
       value: orders.value,
       afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
       currency: orders.currency,
@@ -99,30 +215,16 @@ export async function loadOrdersTableRows(options: {
     .from(orders)
     .innerJoin(contacts, eq(orders.contactId, contacts.id));
 
-  const rows = await (options.filterContactId
-    ? base.where(eq(orders.contactId, options.filterContactId))
-    : base
-  )
+  const rows = await (whereClause ? listBase.where(whereClause) : listBase)
     .orderBy(ordersTableOrderBy(sortKey))
-    .limit(options.limit);
+    .limit(options.pageSize)
+    .offset(offset);
 
-  return rows.map((r) => {
-    const derived = estimateAfnWholeFromStoredUsd(
-      Number(r.value),
-      r.afnPerUsdSnapshot,
-    );
-    return {
-      id: r.id,
-      phone: r.phone,
-      contactId: r.contactId,
-      value: String(r.value),
-      valueAfn: derived == null ? null : String(derived),
-      currency: r.currency,
-      capiSent: r.capiSent,
-      orderEventAt: r.orderEventAt,
-      createdAt: r.createdAt,
-    };
-  });
+  return {
+    rows: rows.map(mapOrderTableRow),
+    total,
+    page,
+  };
 }
 
 export async function loadOrderLineSummaries(

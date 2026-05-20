@@ -7,6 +7,10 @@ import {
   metaEngagementComments,
 } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import {
+  META_ENGAGEMENT_PAGE_SIZE,
+  resolveTablePage,
+} from "@/lib/table-pagination";
 
 export type EngagementPlatform = "facebook" | "instagram";
 
@@ -96,11 +100,19 @@ export async function getEngagementCommentById(
 }
 
 export async function listEngagementComments(opts: {
-  limit?: number;
+  page: number;
+  pageSize?: number;
   platform?: EngagementPlatform | "all";
   status?: "active" | "hidden" | "deleted" | "all";
-}): Promise<(typeof metaEngagementComments.$inferSelect)[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 150, 1), 400);
+}): Promise<{
+  rows: (typeof metaEngagementComments.$inferSelect)[];
+  total: number;
+  page: number;
+}> {
+  const pageSize = Math.min(
+    Math.max(1, opts.pageSize ?? META_ENGAGEMENT_PAGE_SIZE),
+    100,
+  );
   const conditions = [];
   if (opts.platform && opts.platform !== "all") {
     conditions.push(eq(metaEngagementComments.platform, opts.platform));
@@ -115,13 +127,32 @@ export async function listEngagementComments(opts: {
         ? conditions[0]
         : and(...conditions);
 
+  const countBase = db
+    .select({ n: sql<number>`count(*)::int`.mapWith(Number) })
+    .from(metaEngagementComments);
+  const [countRow] = whereClause
+    ? await countBase.where(whereClause)
+    : await countBase;
+  const total = countRow?.n ?? 0;
+  const { page, offset } = resolveTablePage({
+    requestedPage: opts.page,
+    total,
+    pageSize,
+  });
+
   const base = db.select().from(metaEngagementComments);
-  return whereClause
+  const rows = await (whereClause
     ? base
         .where(whereClause)
         .orderBy(desc(metaEngagementComments.createdAt))
-        .limit(limit)
-    : base.orderBy(desc(metaEngagementComments.createdAt)).limit(limit);
+        .limit(pageSize)
+        .offset(offset)
+    : base
+        .orderBy(desc(metaEngagementComments.createdAt))
+        .limit(pageSize)
+        .offset(offset));
+
+  return { rows, total, page };
 }
 
 export async function insertCommentAction(row: {
@@ -136,15 +167,34 @@ export async function insertCommentAction(row: {
   });
 }
 
-export async function listDmBridgeLogs(opts?: {
-  limit?: number;
-}): Promise<(typeof metaDmBridgeLogs.$inferSelect)[]> {
-  const limit = Math.min(Math.max(opts?.limit ?? 100, 1), 400);
-  return db
+export async function listDmBridgeLogs(opts: {
+  page: number;
+  pageSize?: number;
+}): Promise<{
+  rows: (typeof metaDmBridgeLogs.$inferSelect)[];
+  total: number;
+  page: number;
+}> {
+  const pageSize = Math.min(
+    Math.max(1, opts.pageSize ?? META_ENGAGEMENT_PAGE_SIZE),
+    100,
+  );
+  const [countRow] = await db
+    .select({ n: sql<number>`count(*)::int`.mapWith(Number) })
+    .from(metaDmBridgeLogs);
+  const total = countRow?.n ?? 0;
+  const { page, offset } = resolveTablePage({
+    requestedPage: opts.page,
+    total,
+    pageSize,
+  });
+  const rows = await db
     .select()
     .from(metaDmBridgeLogs)
     .orderBy(desc(metaDmBridgeLogs.createdAt))
-    .limit(limit);
+    .limit(pageSize)
+    .offset(offset);
+  return { rows, total, page };
 }
 
 export async function insertDmBridgeLog(row: {

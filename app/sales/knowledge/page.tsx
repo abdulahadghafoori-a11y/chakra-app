@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { SalesSignOutButton } from "@/components/sales-sign-out-button";
+import { TablePagination } from "@/components/table-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -17,13 +19,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listBusinessKnowledgeSummaries } from "@/lib/knowledge/business-knowledge";
+import { listBusinessKnowledgeSummariesPage } from "@/lib/knowledge/business-knowledge";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default async function SalesKnowledgeIndexPage() {
-  const rows = await listBusinessKnowledgeSummaries();
+type SearchParams = { page?: string };
+
+export default async function SalesKnowledgeIndexPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
+  const requestedPage = parseTablePage(sp.page);
+  const { rows, total, page } = await listBusinessKnowledgeSummariesPage({
+    page: requestedPage,
+  });
+  if (total > 0 && requestedPage !== page) {
+    redirect(`/sales/knowledge?page=${page}`);
+  }
+  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_TABLE_PAGE_SIZE));
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -99,6 +119,13 @@ export default async function SalesKnowledgeIndexPage() {
               )}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageCount={pageCount}
+            total={total}
+            itemLabel="articles"
+            className="mt-4"
+          />
         </CardContent>
       </Card>
     </div>

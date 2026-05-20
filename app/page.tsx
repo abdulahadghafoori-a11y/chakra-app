@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { OrdersListTable } from "@/components/orders-list-table";
+import { OrdersSearchToolbar } from "@/components/orders-search-toolbar";
+import { TablePagination } from "@/components/table-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +21,11 @@ import {
 } from "@/lib/orders-list";
 import { getStaffSessionOptional } from "@/lib/staff-auth/guard";
 import { APP_CURRENCY } from "@/lib/validations/order";
+import {
+  DASHBOARD_ORDERS_PAGE_SIZE,
+  DASHBOARD_ORDERS_SEARCH_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +39,7 @@ function moneyLabel(raw: string) {
   });
 }
 
-type SearchParams = { contactId?: string };
+type SearchParams = { contactId?: string; q?: string; page?: string };
 
 export default async function HomePage({
   searchParams,
@@ -74,17 +82,37 @@ export default async function HomePage({
     );
   }
 
-  const { contactId } = await searchParams;
+  const { contactId, q, page: pageRaw } = await searchParams;
   const filterContactId = contactId?.trim() || undefined;
+  const searchQuery = q?.trim() ?? "";
   const coreMode = isCoreFeatureSet();
+  const pageSize = searchQuery
+    ? DASHBOARD_ORDERS_SEARCH_PAGE_SIZE
+    : DASHBOARD_ORDERS_PAGE_SIZE;
+  const requestedPage = parseTablePage(pageRaw);
 
-  const [summary, orderRows] = await Promise.all([
+  const [summary, ordersResult] = await Promise.all([
     getDashboardSummary(),
-    loadOrdersTableRows({ limit: 10, filterContactId }),
+    loadOrdersTableRows({
+      page: requestedPage,
+      pageSize,
+      filterContactId,
+      search: searchQuery || undefined,
+    }),
   ]);
+  const { rows: orderRows, total, page } = ordersResult;
+  if (total > 0 && requestedPage !== page) {
+    const p = new URLSearchParams();
+    if (filterContactId) p.set("contactId", filterContactId);
+    if (searchQuery) p.set("q", searchQuery);
+    p.set("page", String(page));
+    redirect(`/?${p.toString()}`);
+  }
 
   const itemRows = await loadOrderLineSummaries(orderRows.map((o) => o.id));
   const itemsByOrder = groupLinesByOrderId(itemRows);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const rankOffset = (page - 1) * pageSize;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-8">
@@ -190,10 +218,13 @@ export default async function HomePage({
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">Recent orders</h2>
         <p className="text-muted-foreground text-sm">
-          Latest 10{filterContactId ? " (filtered)" : ""}.{" "}
+          {searchQuery
+            ? `Matches for “${searchQuery}”`
+            : `Recent orders${filterContactId ? " (filtered by contact)" : ""}`}
+          {total > 0 ? ` · ${total} total` : ""}.{" "}
           <Link
             className="text-primary underline-offset-2 hover:underline"
             href="/orders"
@@ -201,11 +232,24 @@ export default async function HomePage({
             Open orders page
           </Link>
         </p>
+        <OrdersSearchToolbar
+          initialQuery={searchQuery}
+          preserveKeys={["contactId"]}
+        />
         <OrdersListTable
           rows={orderRows}
           itemsByOrder={itemsByOrder}
           filterContactId={filterContactId}
           coreMode={coreMode}
+          searchQuery={searchQuery}
+          rankOffset={rankOffset}
+        />
+        <TablePagination
+          page={page}
+          pageCount={pageCount}
+          total={total}
+          itemLabel="orders"
+          preserveKeys={["contactId", "q"]}
         />
       </div>
     </div>

@@ -1,12 +1,16 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { products } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  resolveTablePage,
+} from "@/lib/table-pagination";
 import { FULL_FEATURE_UNAVAILABLE, isCoreFeatureSet } from "@/lib/feature-set";
 import { assertStaffSession } from "@/lib/staff-auth/guard";
 
@@ -71,13 +75,8 @@ function isPostgresUniqueViolation(e: unknown): boolean {
   );
 }
 
-export async function listProducts(): Promise<ProductRow[]> {
-  const rows = await db
-    .select()
-    .from(products)
-    .orderBy(desc(products.createdAt));
-
-  return rows.map((p) => ({
+function mapProductRow(p: typeof products.$inferSelect): ProductRow {
+  return {
     id: p.id,
     name: p.name,
     sku: p.sku,
@@ -85,7 +84,39 @@ export async function listProducts(): Promise<ProductRow[]> {
     cogs: String(p.cogs),
     description: p.description,
     createdAt: p.createdAt.toISOString(),
-  }));
+  };
+}
+
+export async function listProducts(): Promise<ProductRow[]> {
+  const rows = await db
+    .select()
+    .from(products)
+    .orderBy(desc(products.createdAt));
+  return rows.map(mapProductRow);
+}
+
+export async function listProductsPage(input: {
+  page: number;
+  pageSize?: number;
+}): Promise<{ rows: ProductRow[]; total: number; page: number }> {
+  const pageSize = Math.min(
+    Math.max(1, input.pageSize ?? DEFAULT_TABLE_PAGE_SIZE),
+    100,
+  );
+  const [countRow] = await db.select({ n: count() }).from(products);
+  const total = Number(countRow?.n ?? 0);
+  const { page, offset } = resolveTablePage({
+    requestedPage: input.page,
+    total,
+    pageSize,
+  });
+  const rows = await db
+    .select()
+    .from(products)
+    .orderBy(desc(products.createdAt))
+    .limit(pageSize)
+    .offset(offset);
+  return { rows: rows.map(mapProductRow), total, page };
 }
 
 export async function createProduct(

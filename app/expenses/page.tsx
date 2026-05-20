@@ -1,15 +1,35 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { ExpensesClient } from "@/app/expenses/expenses-client";
+import { TablePagination } from "@/components/table-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import { loadBusinessExpensesForList } from "@/lib/business-expenses-list";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 import { APP_CURRENCY } from "@/lib/validations/order";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExpensesPage() {
-  const rows = await loadBusinessExpensesForList(500);
+type SearchParams = { page?: string };
+
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
+  const requestedPage = parseTablePage(sp.page);
+  const { rows, total, page } = await loadBusinessExpensesForList({
+    page: requestedPage,
+  });
+  if (total > 0 && requestedPage !== page) {
+    redirect(`/expenses?page=${page}`);
+  }
+  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_TABLE_PAGE_SIZE));
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -40,6 +60,12 @@ export default async function ExpensesPage() {
         </Link>
       </div>
       <ExpensesClient rows={rows} />
+      <TablePagination
+        page={page}
+        pageCount={pageCount}
+        total={total}
+        itemLabel="expenses"
+      />
     </div>
   );
 }

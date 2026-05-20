@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { ProductForm } from "@/components/product-form";
+import { TablePagination } from "@/components/table-pagination";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -17,13 +19,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listProducts } from "@/actions/products";
+import { listProductsPage } from "@/actions/products";
 import { isCoreFeatureSet } from "@/lib/feature-set";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProductsPage() {
-  const productRows = await listProducts();
+type SearchParams = { page?: string };
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
+  const requestedPage = parseTablePage(sp.page);
+  const { rows: productRows, total, page } = await listProductsPage({
+    page: requestedPage,
+  });
+  if (total > 0 && requestedPage !== page) {
+    redirect(`/products?page=${page}`);
+  }
+  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_TABLE_PAGE_SIZE));
   const coreMode = isCoreFeatureSet();
 
   return (
@@ -111,6 +131,12 @@ export default async function ProductsPage() {
         </Table>
         </div>
       </div>
+      <TablePagination
+        page={page}
+        pageCount={pageCount}
+        total={total}
+        itemLabel="products"
+      />
     </div>
   );
 }

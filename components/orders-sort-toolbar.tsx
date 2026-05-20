@@ -37,6 +37,7 @@ export function OrdersSortToolbar({ sort }: { sort: OrdersTableSort }) {
     } else {
       nextParams.set("sort", next);
     }
+    nextParams.delete("page");
     const qs = nextParams.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname);
   }

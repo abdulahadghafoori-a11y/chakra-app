@@ -62,6 +62,12 @@ import { cn } from "@/lib/utils";
 import { APP_CURRENCY } from "@/lib/validations/order";
 
 import { CampaignInsightsToolbar } from "@/components/campaign-insights-toolbar";
+import { TablePagination } from "@/components/table-pagination";
+import {
+  CAMPAIGNS_TABLE_PAGE_SIZE,
+  paginateClientRows,
+  parseTablePage,
+} from "@/lib/table-pagination";
 
 import { loadMetaCampaignTreeAction } from "./actions";
 
@@ -264,6 +270,21 @@ export function CampaignsClient({
     if (verdictFilter === "ALL") return performance;
     return performance.filter((r) => r.verdict === verdictFilter);
   }, [performance, verdictFilter]);
+
+  const requestedPage = parseTablePage(searchParams.get("page") ?? undefined);
+  const campaignsPage = useMemo(
+    () =>
+      paginateClientRows(
+        filteredPerformance,
+        requestedPage,
+        CAMPAIGNS_TABLE_PAGE_SIZE,
+      ),
+    [filteredPerformance, requestedPage],
+  );
+  const preserveQueryKeys = useMemo(
+    () => Array.from(searchParams.keys()).filter((k) => k !== "page"),
+    [searchParams],
+  );
 
   const onLoadCampaignStructure = () => {
     setStructureLoading(true);
@@ -688,7 +709,7 @@ export function CampaignsClient({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPerformance.map((r) => {
+                {campaignsPage.pageRows.map((r) => {
                   const open = expandedId === r.metaCampaignId;
                   const title =
                     r.campaignName?.trim() ||
@@ -1035,6 +1056,16 @@ export function CampaignsClient({
               </TableBody>
             </Table>
           )}
+          {campaignsPage.total > 0 ? (
+            <TablePagination
+              page={campaignsPage.page}
+              pageCount={campaignsPage.pageCount}
+              total={campaignsPage.total}
+              itemLabel="campaigns"
+              preserveKeys={preserveQueryKeys}
+              className="mt-4"
+            />
+          ) : null}
         </CardContent>
       </Card>
 

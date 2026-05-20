@@ -1,4 +1,7 @@
+import { redirect } from "next/navigation";
+
 import { MetaDmBridgeLogsSection } from "@/app/meta-engagement/dm-bridge-logs";
+import { TablePagination } from "@/components/table-pagination";
 import {
   MetaEngagementTable,
   MetaEngagementToolbar,
@@ -8,10 +11,14 @@ import {
   listEngagementComments,
   type EngagementPlatform,
 } from "@/lib/meta-engagement-store";
+import {
+  META_ENGAGEMENT_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { platform?: string; status?: string };
+type SearchParams = { platform?: string; status?: string; page?: string; dmPage?: string };
 
 function parsePlatform(
   v: string | undefined,
@@ -35,15 +42,44 @@ export default async function MetaEngagementPage({
   const sp = await searchParams;
   const platform = parsePlatform(sp.platform);
   const status = parseStatus(sp.status);
+  const requestedPage = parseTablePage(sp.page);
+  const requestedDmPage = parseTablePage(sp.dmPage);
 
-  const [rows, dmLogs] = await Promise.all([
+  const [commentsResult, dmResult] = await Promise.all([
     listEngagementComments({
       platform,
       status,
-      limit: 250,
+      page: requestedPage,
     }),
-    listDmBridgeLogs({ limit: 150 }),
+    listDmBridgeLogs({ page: requestedDmPage }),
   ]);
+  const { rows, total, page } = commentsResult;
+  const {
+    rows: dmLogs,
+    total: dmTotal,
+    page: dmPage,
+  } = dmResult;
+  if (total > 0 && requestedPage !== page) {
+    const p = new URLSearchParams();
+    if (platform !== "all") p.set("platform", platform);
+    if (status !== "all") p.set("status", status);
+    p.set("page", String(page));
+    if (requestedDmPage > 1) p.set("dmPage", String(requestedDmPage));
+    redirect(`/meta-engagement?${p.toString()}`);
+  }
+  if (dmTotal > 0 && requestedDmPage !== dmPage) {
+    const p = new URLSearchParams();
+    if (platform !== "all") p.set("platform", platform);
+    if (status !== "all") p.set("status", status);
+    if (page > 1) p.set("page", String(page));
+    p.set("dmPage", String(dmPage));
+    redirect(`/meta-engagement?${p.toString()}`);
+  }
+  const pageCount = Math.max(1, Math.ceil(total / META_ENGAGEMENT_PAGE_SIZE));
+  const dmPageCount = Math.max(
+    1,
+    Math.ceil(dmTotal / META_ENGAGEMENT_PAGE_SIZE),
+  );
 
   const serialized = rows.map((r) => ({
     id: r.id,
@@ -90,8 +126,23 @@ export default async function MetaEngagementPage({
 
       <MetaEngagementToolbar platform={platform} status={status} />
       <MetaEngagementTable rows={serialized} />
+      <TablePagination
+        page={page}
+        pageCount={pageCount}
+        total={total}
+        itemLabel="comments"
+        preserveKeys={["platform", "status", "dmPage"]}
+      />
 
       <MetaDmBridgeLogsSection rows={dmSerialized} />
+      <TablePagination
+        page={dmPage}
+        pageCount={dmPageCount}
+        total={dmTotal}
+        itemLabel="DM logs"
+        preserveKeys={["platform", "status", "page"]}
+        paramKey="dmPage"
+      />
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
+import { TablePagination } from "@/components/table-pagination";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -20,6 +22,10 @@ import {
 import { SalesSignOutButton } from "@/components/sales-sign-out-button";
 import { listSalesInboxConversations } from "@/lib/sales-inbox/data";
 import { formatDateTimeKabul } from "@/lib/kabul-time";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  parseTablePage,
+} from "@/lib/table-pagination";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +34,7 @@ type SearchParams = {
   stage?: string;
   lead?: string;
   preset?: string;
+  page?: string;
 };
 
 function withSalesQuery(path: string, extra: Record<string, string | undefined>) {
@@ -55,12 +62,23 @@ export default async function SalesInboxPage({
       : "all";
   const stage = sp.stage?.trim() || undefined;
   const lead = sp.lead?.trim() || undefined;
+  const requestedPage = parseTablePage(sp.page);
 
-  const rows = await listSalesInboxConversations({
+  const { rows, total, page } = await listSalesInboxConversations({
     stage,
     lead,
     preset,
+    page: requestedPage,
   });
+  if (total > 0 && requestedPage !== page) {
+    const p = new URLSearchParams();
+    if (preset !== "all") p.set("preset", preset);
+    if (stage) p.set("stage", stage);
+    if (lead) p.set("lead", lead);
+    p.set("page", String(page));
+    redirect(`/sales?${p.toString()}`);
+  }
+  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_TABLE_PAGE_SIZE));
 
   const base = "/sales";
 
@@ -165,7 +183,12 @@ export default async function SalesInboxPage({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Conversations</CardTitle>
-          <CardDescription>{rows.length} rows (max 200)</CardDescription>
+          <CardDescription>
+            {total} conversation{total === 1 ? "" : "s"}
+            {preset === "unanswered"
+              ? " (unanswered scans latest 500 by update time)"
+              : ""}
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
@@ -223,6 +246,14 @@ export default async function SalesInboxPage({
               )}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageCount={pageCount}
+            total={total}
+            itemLabel="conversations"
+            preserveKeys={["preset", "stage", "lead"]}
+            className="mt-4"
+          />
         </CardContent>
       </Card>
     </div>

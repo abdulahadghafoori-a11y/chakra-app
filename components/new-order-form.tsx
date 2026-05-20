@@ -1,10 +1,10 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -169,6 +169,7 @@ export function NewOrderForm({
     initialFx.afnPerOneUsd > 0;
   const fxRateNumber = fxRateValid ? initialFx.afnPerOneUsd : Number.NaN;
   const [sessions, setSessions] = useState<CtwaSessionRow[]>([]);
+  const multiSessionNotifyKeyRef = useRef<string | null>(null);
   const [loadingPhoneData, setLoadingPhoneData] = useState(false);
   const [contactPhase, setContactPhase] = useState<ContactPhase>({
     status: "idle",
@@ -274,12 +275,14 @@ export function NewOrderForm({
         setSessions([]);
         setValue("ctwaSessionId", "");
         setContactPhase({ status: "idle" });
+        multiSessionNotifyKeyRef.current = null;
         return;
       }
       if (!isValidE164Input(trimmed)) {
         setSessions([]);
         setValue("ctwaSessionId", "");
         setContactPhase({ status: "idle" });
+        multiSessionNotifyKeyRef.current = null;
         return;
       }
       setContactPhase({ status: "loading" });
@@ -301,6 +304,18 @@ export function NewOrderForm({
     }, 450);
     return () => clearTimeout(t);
   }, [phone, setValue]);
+
+  useEffect(() => {
+    if (loadingPhoneData || sessions.length <= 1) return;
+    const key = `${(phone ?? "").trim()}::${sessions.length}`;
+    if (multiSessionNotifyKeyRef.current === key) return;
+    multiSessionNotifyKeyRef.current = key;
+    toast.info("Multiple CTWA sessions for this contact", {
+      description:
+        "Choose the session that matches this customer's WhatsApp ad click. Latest is pre-selected — confirm before you submit.",
+      duration: 10_000,
+    });
+  }, [loadingPhoneData, phone, sessions.length]);
 
   useEffect(() => {
     if (contactPhase.status === "not_found") {
@@ -551,6 +566,29 @@ export function NewOrderForm({
               <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Attribution
               </p>
+              {sessions.length > 1 ? (
+                <div
+                  className="flex gap-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-2.5 text-sm leading-relaxed"
+                  role="alert"
+                >
+                  <AlertTriangleIcon
+                    className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-medium text-amber-950 dark:text-amber-50">
+                      {sessions.length} CTWA sessions — pick the right one
+                    </p>
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      This contact clicked more than one WhatsApp ad. Select the session
+                      that matches <strong className="text-foreground font-medium">this</strong>{" "}
+                      order (campaign, ad, and time).{" "}
+                      <strong className="text-foreground font-medium">Latest</strong> is
+                      pre-selected but may not be the click you want for Meta CAPI.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
                 <FormField
                   control={form.control}

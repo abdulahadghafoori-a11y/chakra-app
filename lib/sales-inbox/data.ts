@@ -10,6 +10,10 @@ import {
   salesDraftOrders,
 } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  resolveTablePage,
+} from "@/lib/table-pagination";
 
 export type SalesInboxListRow = {
   id: string;
@@ -48,12 +52,21 @@ function buildListConditions(opts: {
   return parts.length === 1 ? parts[0]! : and(...parts);
 }
 
+const SALES_INBOX_SCAN_CAP = 500;
+
 export async function listSalesInboxConversations(opts: {
   stage?: string;
   lead?: string;
   preset?: "all" | "handoff" | "ready" | "unanswered";
-}): Promise<SalesInboxListRow[]> {
+  page: number;
+  pageSize?: number;
+}): Promise<{ rows: SalesInboxListRow[]; total: number; page: number }> {
+  const pageSize = Math.min(
+    Math.max(1, opts.pageSize ?? DEFAULT_TABLE_PAGE_SIZE),
+    100,
+  );
   const where = buildListConditions(opts);
+  const unanswered = opts.preset === "unanswered";
 
   const baseQuery = db
     .select({
@@ -76,34 +89,83 @@ export async function listSalesInboxConversations(opts: {
       eq(conversationProfiles.conversationId, conversations.id),
     );
 
-  const rows = await (where
-    ? baseQuery.where(where)
-    : baseQuery
-  )
+  if (!unanswered) {
+    const countBase = db
+      .select({ n: count() })
+      .from(conversations)
+      .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+      .leftJoin(
+        conversationProfiles,
+        eq(conversationProfiles.conversationId, conversations.id),
+      );
+    const [countRow] = where
+      ? await countBase.where(where)
+      : await countBase;
+    const total = Number(countRow?.n ?? 0);
+    const { page, offset } = resolveTablePage({
+      requestedPage: opts.page,
+      total,
+      pageSize,
+    });
+
+    const rows = await (where ? baseQuery.where(where) : baseQuery)
+      .orderBy(desc(conversations.updatedAt))
+      .limit(pageSize)
+      .offset(offset);
+
+    const ids = rows.map((r) => r.id);
+    const lastRoleMap = await loadLastMessageRoles(ids);
+    const mapped: SalesInboxListRow[] = rows.map((r) => ({
+      id: r.id,
+      waId: r.waId,
+      stage: r.stage,
+      leadScore: r.leadScore,
+      status: r.status,
+      conversationSummary: r.conversationSummary,
+      updatedAt: r.updatedAt,
+      contactPhone: r.contactPhone,
+      contactId: r.contactId,
+      contactName: r.contactName,
+      profileCity: r.profileCity,
+      lastRole: lastRoleMap.get(r.id) ?? null,
+    }));
+    return { rows: mapped, total, page };
+  }
+
+  const rows = await (where ? baseQuery.where(where) : baseQuery)
     .orderBy(desc(conversations.updatedAt))
-    .limit(200);
+    .limit(SALES_INBOX_SCAN_CAP);
 
   const ids = rows.map((r) => r.id);
   const lastRoleMap = await loadLastMessageRoles(ids);
+  const filtered: SalesInboxListRow[] = rows
+    .map((r) => ({
+      id: r.id,
+      waId: r.waId,
+      stage: r.stage,
+      leadScore: r.leadScore,
+      status: r.status,
+      conversationSummary: r.conversationSummary,
+      updatedAt: r.updatedAt,
+      contactPhone: r.contactPhone,
+      contactId: r.contactId,
+      contactName: r.contactName,
+      profileCity: r.profileCity,
+      lastRole: lastRoleMap.get(r.id) ?? null,
+    }))
+    .filter((r) => r.lastRole === "user");
 
-  const unanswered = opts.preset === "unanswered";
-  const mapped: SalesInboxListRow[] = rows.map((r) => ({
-    id: r.id,
-    waId: r.waId,
-    stage: r.stage,
-    leadScore: r.leadScore,
-    status: r.status,
-    conversationSummary: r.conversationSummary,
-    updatedAt: r.updatedAt,
-    contactPhone: r.contactPhone,
-    contactId: r.contactId,
-    contactName: r.contactName,
-    profileCity: r.profileCity,
-    lastRole: lastRoleMap.get(r.id) ?? null,
-  }));
-
-  if (!unanswered) return mapped;
-  return mapped.filter((r) => r.lastRole === "user");
+  const total = filtered.length;
+  const { page, offset } = resolveTablePage({
+    requestedPage: opts.page,
+    total,
+    pageSize,
+  });
+  return {
+    rows: filtered.slice(offset, offset + pageSize),
+    total,
+    page,
+  };
 }
 
 async function loadLastMessageRoles(

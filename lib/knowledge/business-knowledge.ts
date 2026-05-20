@@ -1,7 +1,11 @@
-import { asc, eq, ilike, or } from "drizzle-orm";
+import { asc, count, eq, ilike, or } from "drizzle-orm";
 
 import { businessKnowledge } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  resolveTablePage,
+} from "@/lib/table-pagination";
 
 /** Map tool topic aliases to `business_knowledge.slug`; unknown ASCII slugs pass through sanitized. */
 export function normalizeKnowledgeSlug(raw: string): string {
@@ -37,6 +41,36 @@ export async function listBusinessKnowledgeSummaries() {
     })
     .from(businessKnowledge)
     .orderBy(asc(businessKnowledge.sortOrder), asc(businessKnowledge.slug));
+}
+
+export async function listBusinessKnowledgeSummariesPage(input: {
+  page: number;
+  pageSize?: number;
+}) {
+  const pageSize = Math.min(
+    Math.max(1, input.pageSize ?? DEFAULT_TABLE_PAGE_SIZE),
+    100,
+  );
+  const [countRow] = await db
+    .select({ n: count() })
+    .from(businessKnowledge);
+  const total = Number(countRow?.n ?? 0);
+  const { page, offset } = resolveTablePage({
+    requestedPage: input.page,
+    total,
+    pageSize,
+  });
+  const rows = await db
+    .select({
+      slug: businessKnowledge.slug,
+      title: businessKnowledge.title,
+      sortOrder: businessKnowledge.sortOrder,
+    })
+    .from(businessKnowledge)
+    .orderBy(asc(businessKnowledge.sortOrder), asc(businessKnowledge.slug))
+    .limit(pageSize)
+    .offset(offset);
+  return { rows, total, page };
 }
 
 function sanitizeIlike(s: string): string {

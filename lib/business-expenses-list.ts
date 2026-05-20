@@ -1,7 +1,11 @@
-import { desc } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 
 import { businessExpenses } from "@/drizzle/schema";
 import { db } from "@/lib/db";
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  resolveTablePage,
+} from "@/lib/table-pagination";
 
 export type BusinessExpenseRow = {
   id: string;
@@ -13,10 +17,25 @@ export type BusinessExpenseRow = {
   createdAt: Date;
 };
 
-export async function loadBusinessExpensesForList(
-  limit = 500,
-): Promise<BusinessExpenseRow[]> {
-  return db
+export async function loadBusinessExpensesForList(input: {
+  page: number;
+  pageSize?: number;
+}): Promise<{ rows: BusinessExpenseRow[]; total: number; page: number }> {
+  const pageSize = Math.min(
+    Math.max(1, input.pageSize ?? DEFAULT_TABLE_PAGE_SIZE),
+    100,
+  );
+  const [countRow] = await db
+    .select({ n: count() })
+    .from(businessExpenses);
+  const total = Number(countRow?.n ?? 0);
+  const { page, offset } = resolveTablePage({
+    requestedPage: input.page,
+    total,
+    pageSize,
+  });
+
+  const rows = await db
     .select({
       id: businessExpenses.id,
       category: businessExpenses.category,
@@ -28,5 +47,8 @@ export async function loadBusinessExpensesForList(
     })
     .from(businessExpenses)
     .orderBy(desc(businessExpenses.incurredDate), desc(businessExpenses.createdAt))
-    .limit(limit);
+    .limit(pageSize)
+    .offset(offset);
+
+  return { rows, total, page };
 }

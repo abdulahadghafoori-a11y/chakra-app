@@ -25,12 +25,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  formatOrderDeliveryAddressLine,
+  formatOrderStatusLabel,
   formatOrderTableWhen,
   formatOrderUsdTable,
   type OrderLineSummary,
   type OrderTableRow,
 } from "@/lib/orders-list";
 import { cn } from "@/lib/utils";
+
+function orderStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "paid":
+    case "confirmed":
+      return "border-emerald-600/40 bg-emerald-600/10 text-emerald-900 dark:text-emerald-100";
+    case "cancelled":
+    case "returned":
+      return "border-destructive/40 bg-destructive/10 text-destructive";
+    case "shipped":
+      return "border-sky-600/35 bg-sky-600/10 text-sky-950 dark:text-sky-100";
+    case "pending":
+    default:
+      return "border-muted-foreground/40 bg-muted/50 text-muted-foreground";
+  }
+}
 
 function productHref(coreMode: boolean, productId: string) {
   return coreMode
@@ -43,6 +61,9 @@ type Props = {
   itemsByOrder: Map<string, OrderLineSummary[]>;
   filterContactId?: string;
   coreMode: boolean;
+  searchQuery?: string;
+  /** 0-based row index offset for the # column when paginated. */
+  rankOffset?: number;
 };
 
 export function OrdersListTable({
@@ -50,6 +71,8 @@ export function OrdersListTable({
   itemsByOrder,
   filterContactId,
   coreMode,
+  searchQuery,
+  rankOffset = 0,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -104,7 +127,7 @@ export function OrdersListTable({
       ) : null}
       <div className="-mx-3 overflow-x-auto sm:mx-0">
         <div className="inline-block min-w-full overflow-hidden rounded-xl border align-middle">
-          <Table className="min-w-[48rem]">
+          <Table className="min-w-[56rem]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10 text-center align-middle tabular-nums">
@@ -115,6 +138,10 @@ export function OrdersListTable({
                 <TableHead className="text-center align-middle">
                   Products
                 </TableHead>
+                <TableHead className="text-center align-middle min-w-[7rem]">
+                  Delivery
+                </TableHead>
+                <TableHead className="text-center align-middle">Status</TableHead>
                 <TableHead className="text-center align-middle">Total</TableHead>
                 <TableHead className="text-center align-middle">CAPI</TableHead>
                 <TableHead className="text-center align-middle">
@@ -131,24 +158,32 @@ export function OrdersListTable({
                 <TableRow>
                   <TableCell
                     className="text-muted-foreground text-center align-middle"
-                    colSpan={9}
+                    colSpan={11}
                   >
-                    No orders yet. Create products, then record an order.
+                    {searchQuery?.trim()
+                      ? `No orders match “${searchQuery.trim()}”.`
+                      : "No orders yet. Create products, then record an order."}
                   </TableCell>
                 </TableRow>
               ) : (
                 rows.map((r, rowIndex) => {
                   const items = itemsByOrder.get(r.id) ?? [];
                   const totalPrimary = `${r.currency} ${formatOrderUsdTable(r.value)}`;
-                  const totalTitle =
+                  const afnWhole =
                     r.valueAfn != null && r.valueAfn.trim() !== ""
-                      ? `${totalPrimary} · AFN ${Math.round(Number(r.valueAfn))}`
+                      ? Math.round(Number(r.valueAfn))
+                      : null;
+                  const totalTitle =
+                    afnWhole != null
+                      ? `${totalPrimary} · AFN ${afnWhole}`
                       : totalPrimary;
+                  const deliveryLine = formatOrderDeliveryAddressLine(r);
+                  const tracking = r.deliveryTrackingNumber?.trim() || null;
 
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="text-muted-foreground align-middle text-center text-xs tabular-nums">
-                        {rowIndex + 1}
+                        {rankOffset + rowIndex + 1}
                       </TableCell>
                       <TableCell className="max-w-[10rem] min-w-0 align-middle text-center font-mono text-xs">
                         <Link
@@ -189,6 +224,29 @@ export function OrdersListTable({
                           </div>
                         )}
                       </TableCell>
+                      <TableCell className="max-w-[9rem] min-w-0 align-middle px-2 text-center text-xs leading-snug whitespace-normal break-words">
+                        <span className="font-medium text-foreground">
+                          {deliveryLine}
+                        </span>
+                        {tracking ? (
+                          <span className="text-muted-foreground mt-0.5 block font-mono text-[10px] break-all">
+                            {tracking}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="align-middle text-center">
+                        <div className="flex justify-center">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "px-1.5 py-0 text-[10px] font-semibold uppercase",
+                              orderStatusBadgeClass(r.status),
+                            )}
+                          >
+                            {formatOrderStatusLabel(r.status)}
+                          </Badge>
+                        </div>
+                      </TableCell>
                       <TableCell className="max-w-[7.5rem] min-w-0 align-middle text-center text-xs tabular-nums">
                         <span
                           className="block truncate font-medium text-foreground"
@@ -196,6 +254,14 @@ export function OrdersListTable({
                         >
                           {totalPrimary}
                         </span>
+                        {afnWhole != null ? (
+                          <span
+                            className="text-muted-foreground mt-0.5 block truncate text-[11px]"
+                            title={`AFN ${afnWhole}`}
+                          >
+                            AFN {afnWhole.toLocaleString()}
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell className="align-middle text-center">
                         <div className="flex justify-center">
