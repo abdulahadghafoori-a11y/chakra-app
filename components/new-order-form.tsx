@@ -4,17 +4,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { AlertTriangleIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
-import {
-  getContactByPhone,
-  type ContactLookup,
-} from "@/actions/contact";
 import { createOrder, previewOrderCapiPayload } from "@/actions/order";
-import type { CtwaSessionRow } from "@/actions/ctwa";
-import { getCtwaSessionsByPhone } from "@/actions/ctwa";
 import type { ProductRow } from "@/actions/products";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +53,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { summarizeCtwaSessionLabel } from "@/lib/referral";
 import { getPhonePresentation } from "@/lib/phone-display";
 import { isValidE164Input } from "@/lib/phone-e164";
 import {
@@ -68,7 +61,13 @@ import {
   getDefaultKabulDateTimeLocal,
 } from "@/lib/kabul-time";
 import {
-  type NewOrderFormInput,
+  CtwaSessionAttributionFooter,
+  defaultLine,
+  sessionOptionLabel,
+  type FormValues,
+} from "@/components/new-order-form/shared";
+import { usePhoneLookup } from "@/components/new-order-form/use-phone-lookup";
+import {
   newOrderFormSchema,
   orderStatuses,
 } from "@/lib/validations/order";
@@ -89,63 +88,6 @@ import { ProvinceSearchCombobox } from "@/components/province-search-combobox";
 import { DraftNumericInput } from "@/components/draft-numeric-input";
 import { AFGHANISTAN_PROVINCES_OUTSIDE_KABUL } from "@/lib/afghanistan-provinces";
 import type { MetaCampaignPickerOption } from "@/lib/campaigns-rollups";
-
-type FormValues = NewOrderFormInput;
-
-type ContactPhase =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "not_found" }
-  | { status: "found"; contact: ContactLookup };
-
-function sessionTriggerLabel(s: CtwaSessionRow): string {
-  const clid = s.ctwaClid?.slice(0, 12) ?? "—";
-  return `${clid}… · ${formatDateTimeKabul(s.sendTime)}`;
-}
-
-function sessionOptionLabel(s: CtwaSessionRow): string {
-  return `${sessionTriggerLabel(s)} · ${summarizeCtwaSessionLabel(s)}`;
-}
-
-function CtwaSessionAttributionFooter({
-  session,
-}: {
-  session: CtwaSessionRow | undefined;
-}) {
-  if (!session) return null;
-  return (
-    <>
-      <p className="text-muted-foreground text-xs">
-        Campaign:{" "}
-        <span className="text-foreground font-medium">
-          {session.campaignName?.trim() ||
-            "— (not linked to a synced campaign)"}
-        </span>
-      </p>
-      {session.wabaId ? (
-        <p className="text-muted-foreground font-mono text-xs">
-          WABA {session.wabaId}
-          {session.phoneNumberId
-            ? ` · phone_number_id ${session.phoneNumberId}`
-            : null}
-        </p>
-      ) : null}
-    </>
-  );
-}
-
-function defaultLine(products: ProductRow[], fxValid: boolean, afnPerUsd: number) {
-  const p = products[0];
-  if (!p) {
-    return { productId: "", quantity: 1, unitSalePrice: 1 };
-  }
-  if (!fxValid) {
-    return { productId: p.id, quantity: 1, unitSalePrice: 1 };
-  }
-  const afn = catalogUsdToDefaultAfn(Number(p.defaultSalePrice), afnPerUsd);
-  const safe = Number.isFinite(afn) && afn > 0 ? afn : 1;
-  return { productId: p.id, quantity: 1, unitSalePrice: safe };
-}
 
 export function NewOrderForm({
   products,
@@ -168,12 +110,6 @@ export function NewOrderForm({
     Number.isFinite(initialFx.afnPerOneUsd) &&
     initialFx.afnPerOneUsd > 0;
   const fxRateNumber = fxRateValid ? initialFx.afnPerOneUsd : Number.NaN;
-  const [sessions, setSessions] = useState<CtwaSessionRow[]>([]);
-  const multiSessionNotifyKeyRef = useRef<string | null>(null);
-  const [loadingPhoneData, setLoadingPhoneData] = useState(false);
-  const [contactPhase, setContactPhase] = useState<ContactPhase>({
-    status: "idle",
-  });
   const [pending, startTransition] = useTransition();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -199,6 +135,8 @@ export function NewOrderForm({
   });
 
   const { setValue, control } = form;
+  const { sessions, loadingPhoneData, contactPhase, phone } =
+    usePhoneLookup(form);
   const { fields, append, remove } = useFieldArray({
     control,
     name: "lines",
@@ -210,7 +148,6 @@ export function NewOrderForm({
     }
   }, [initialPhone, setValue]);
 
-  const phone = form.watch("phone");
   const phoneTrimmed = (phone ?? "").trim();
   const phoneOk = isValidE164Input(phoneTrimmed);
 
@@ -267,67 +204,6 @@ export function NewOrderForm({
       form.clearErrors("manualMetaCampaignId");
     }
   }, [requireManualCampaignPick, form]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const trimmed = (phone ?? "").trim();
-      if (!trimmed) {
-        setSessions([]);
-        setValue("ctwaSessionId", "");
-        setContactPhase({ status: "idle" });
-        multiSessionNotifyKeyRef.current = null;
-        return;
-      }
-      if (!isValidE164Input(trimmed)) {
-        setSessions([]);
-        setValue("ctwaSessionId", "");
-        setContactPhase({ status: "idle" });
-        multiSessionNotifyKeyRef.current = null;
-        return;
-      }
-      setContactPhase({ status: "loading" });
-      setLoadingPhoneData(true);
-      void Promise.all([
-        getCtwaSessionsByPhone(trimmed),
-        getContactByPhone(trimmed),
-      ])
-        .then(([rows, contact]) => {
-          setSessions(rows);
-          setValue("ctwaSessionId", rows[0]?.id ?? "");
-          if (contact) {
-            setContactPhase({ status: "found", contact });
-          } else {
-            setContactPhase({ status: "not_found" });
-          }
-        })
-        .finally(() => setLoadingPhoneData(false));
-    }, 450);
-    return () => clearTimeout(t);
-  }, [phone, setValue]);
-
-  useEffect(() => {
-    if (loadingPhoneData || sessions.length <= 1) return;
-    const key = `${(phone ?? "").trim()}::${sessions.length}`;
-    if (multiSessionNotifyKeyRef.current === key) return;
-    multiSessionNotifyKeyRef.current = key;
-    toast.info("Multiple CTWA sessions for this contact", {
-      description:
-        "Choose the session that matches this customer's WhatsApp ad click. Latest is pre-selected — confirm before you submit.",
-      duration: 10_000,
-    });
-  }, [loadingPhoneData, phone, sessions.length]);
-
-  useEffect(() => {
-    if (contactPhase.status === "not_found") {
-      form.setError("phone", {
-        type: "manual",
-        message:
-          "No contact found for this number. The customer must reach you on WhatsApp first.",
-      });
-    } else {
-      form.clearErrors("phone");
-    }
-  }, [contactPhase, form]);
 
   const orderTotalAfn = useMemo(() => {
     return (watchedLines ?? []).reduce((sum, line) => {
@@ -602,6 +478,8 @@ export function NewOrderForm({
                           placeholder="+1 555…"
                           autoComplete="tel"
                           inputMode="tel"
+                          aria-busy={loadingPhoneData}
+                          aria-describedby="phone-lookup-hint"
                           {...field}
                         />
                       </FormControl>
@@ -735,7 +613,10 @@ export function NewOrderForm({
                   )}
                 </div>
               ) : null}
-              <p className="text-muted-foreground text-xs">
+              <p
+                id="phone-lookup-hint"
+                className="text-muted-foreground text-xs"
+              >
                 Looks up the saved contact and CTWA sessions for this number.
               </p>
               {loadingPhoneData ? (

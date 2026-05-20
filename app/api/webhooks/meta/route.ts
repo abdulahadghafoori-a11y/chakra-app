@@ -36,6 +36,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function metaWebhookDebugEnabled(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
   const v = process.env.META_WEBHOOK_DEBUG?.trim().toLowerCase();
   return v === "true" || v === "1" || v === "yes";
 }

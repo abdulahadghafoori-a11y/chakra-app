@@ -21,14 +21,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -66,13 +58,11 @@ import type {
 import { cn } from "@/lib/utils";
 import { APP_CURRENCY } from "@/lib/validations/order";
 
+import { CampaignPerformanceCards } from "@/components/campaigns/campaign-performance-cards";
+import { CampaignVerdictFilter } from "@/components/campaigns/campaign-verdict-filter";
 import { CampaignInsightsToolbar } from "@/components/campaign-insights-toolbar";
 import { TablePagination } from "@/components/table-pagination";
-import {
-  CAMPAIGNS_TABLE_PAGE_SIZE,
-  paginateClientRows,
-  parseTablePage,
-} from "@/lib/table-pagination";
+import type { CampaignVerdictFilter as CampaignVerdictFilterValue } from "@/lib/campaigns-list-page";
 
 import { loadMetaCampaignTreeAction } from "./actions";
 
@@ -103,7 +93,13 @@ type GapTotals = {
 };
 
 type Props = {
-  performance: CampaignPerformanceRow[];
+  performanceCount: number;
+  campaignRows: CampaignPerformanceRow[];
+  campaignPage: number;
+  campaignPageCount: number;
+  campaignTotal: number;
+  campaignRankOffset: number;
+  verdictFilter: CampaignVerdictFilterValue;
   totals: Totals;
   unattributed: GapTotals;
   unlinkedCtwaOrders: GapTotals;
@@ -149,8 +145,6 @@ function fmtMetaQualityScore(n: number | null) {
   if (n == null || Number.isNaN(n)) return "—";
   return n.toFixed(2);
 }
-
-type VerdictFilter = CampaignVerdict | "ALL";
 
 function metaEffectiveStatusBadgeClass(status: string | null): string {
   const s = status?.toUpperCase() ?? "";
@@ -206,7 +200,13 @@ function verdictBadgeClass(v: CampaignVerdict): string {
 }
 
 export function CampaignsClient({
-  performance,
+  performanceCount,
+  campaignRows,
+  campaignPage,
+  campaignPageCount,
+  campaignTotal,
+  campaignRankOffset,
+  verdictFilter,
   totals,
   unattributed,
   unlinkedCtwaOrders,
@@ -221,7 +221,6 @@ export function CampaignsClient({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>("ALL");
   const [structureTree, setStructureTree] = useState<
     MetaCampaignTreeCampaign[] | null
   >(null);
@@ -273,21 +272,6 @@ export function CampaignsClient({
     }));
   };
 
-  const filteredPerformance = useMemo(() => {
-    if (verdictFilter === "ALL") return performance;
-    return performance.filter((r) => r.verdict === verdictFilter);
-  }, [performance, verdictFilter]);
-
-  const requestedPage = parseTablePage(searchParams.get("page") ?? undefined);
-  const campaignsPage = useMemo(
-    () =>
-      paginateClientRows(
-        filteredPerformance,
-        requestedPage,
-        CAMPAIGNS_TABLE_PAGE_SIZE,
-      ),
-    [filteredPerformance, requestedPage],
-  );
   const preserveQueryKeys = useMemo(
     () => Array.from(searchParams.keys()).filter((k) => k !== "page"),
     [searchParams],
@@ -496,30 +480,7 @@ export function CampaignsClient({
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="flex flex-col gap-1.5 sm:w-52">
-            <Label htmlFor="verdict-filter" className="text-xs">
-              Filter by verdict
-            </Label>
-            <Select
-              value={verdictFilter}
-              onValueChange={(v) => setVerdictFilter(v as VerdictFilter)}
-            >
-              <SelectTrigger id="verdict-filter" size="sm" className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All verdicts</SelectItem>
-                <SelectItem value="SCALE">SCALE</SelectItem>
-                <SelectItem value="KEEP">KEEP</SelectItem>
-                <SelectItem value="OPTIMIZE">OPTIMIZE</SelectItem>
-                <SelectItem value="KILL">KILL</SelectItem>
-                <SelectItem value="LEARNING">LEARNING</SelectItem>
-                <SelectItem value="ATTRIBUTION_ISSUE">
-                  ATTRIBUTION_ISSUE
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            </div>
+            <CampaignVerdictFilter value={verdictFilter} />
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
@@ -550,18 +511,24 @@ export function CampaignsClient({
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          {performance.length === 0 ? (
+          {performanceCount === 0 ? (
             <p className="text-muted-foreground text-sm">
               Nothing to show for this range: no spend, CTWA sessions, attributed
               orders, or synced Ads Insights rows tied to a campaign id.
             </p>
-          ) : filteredPerformance.length === 0 ? (
+          ) : campaignTotal === 0 ? (
             <p className="text-muted-foreground text-sm">
               No campaigns match this verdict filter. Choose &quot;All verdicts&quot;
               or another option.
             </p>
           ) : (
-            <Table>
+            <>
+            <CampaignPerformanceCards
+              rows={campaignRows}
+              rankOffset={campaignRankOffset}
+            />
+            <div className="hidden md:block">
+            <Table aria-label="Campaign performance">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-9" />
@@ -715,7 +682,7 @@ export function CampaignsClient({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {campaignsPage.pageRows.map((r) => {
+                {campaignRows.map((r) => {
                   const open = expandedId === r.metaCampaignId;
                   const title =
                     r.campaignName?.trim() ||
@@ -1067,12 +1034,14 @@ export function CampaignsClient({
                 })}
               </TableBody>
             </Table>
+            </div>
+            </>
           )}
-          {campaignsPage.total > 0 ? (
+          {campaignTotal > 0 ? (
             <TablePagination
-              page={campaignsPage.page}
-              pageCount={campaignsPage.pageCount}
-              total={campaignsPage.total}
+              page={campaignPage}
+              pageCount={campaignPageCount}
+              total={campaignTotal}
               itemLabel="campaigns"
               preserveKeys={preserveQueryKeys}
               className="mt-4"

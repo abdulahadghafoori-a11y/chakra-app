@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { contacts, ctwaSessions, metaAds, metaCampaigns } from "@/drizzle/schema";
 import { db } from "@/lib/db";
 import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
+import { enforcePublicActionRateLimit } from "@/lib/rate-limit";
 
 export type CtwaSessionRow = {
   id: string;
@@ -24,6 +25,12 @@ export type CtwaSessionRow = {
 export async function getCtwaSessionsByPhone(
   rawPhone: string,
 ): Promise<CtwaSessionRow[]> {
+  const limited = await enforcePublicActionRateLimit("ctwa_lookup", {
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) return [];
+
   const phoneKey = contactPhoneKeyFromRaw(rawPhone);
   if (!phoneKey) return [];
 

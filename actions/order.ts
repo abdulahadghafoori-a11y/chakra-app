@@ -40,6 +40,8 @@ import {
 } from "@/lib/order-meta-capi";
 import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
 import { recordManualCampaignAttributionChange } from "@/lib/campaign-activity";
+import { enforcePublicActionRateLimit } from "@/lib/rate-limit";
+import { log } from "@/lib/structured-log";
 import { assertStaffSession, requireStaffSession } from "@/lib/staff-auth/guard";
 import {
   APP_CURRENCY,
@@ -103,6 +105,12 @@ async function resolveOrderUsdAfnRate(): Promise<
 export async function previewOrderCapiPayload(
   input: CreateOrderInput,
 ): Promise<{ ok: true; payloadJson: string } | { ok: false; error: string }> {
+  const limited = await enforcePublicActionRateLimit("preview_order_capi", {
+    limit: 20,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) return { ok: false, error: limited.error };
+
   const parsed = createOrderSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -338,6 +346,12 @@ export async function getOrderConfirmation(
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
+  const limited = await enforcePublicActionRateLimit("create_order", {
+    limit: 15,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) return { ok: false, error: limited.error };
+
   const parsed = createOrderSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -502,7 +516,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       capiPayloadJson = capiResult.payloadJson;
       capiSent = true;
     } catch (e) {
-      console.error("[createOrder] Meta CAPI failed", e);
+      log.error("create_order.capi_failed", {
+        message: e instanceof Error ? e.message : String(e),
+      });
       const message = e instanceof Error ? e.message : "Meta CAPI request failed";
       return { ok: false, error: message };
     }
@@ -565,7 +581,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       }),
     );
   } catch (e) {
-    console.error("[createOrder] order_items insert failed", e);
+    log.error("create_order.items_insert_failed", {
+      message: e instanceof Error ? e.message : String(e),
+    });
     await db.delete(orders).where(eq(orders.id, inserted.id));
     return {
       ok: false,
@@ -584,7 +602,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         toCampaignId: manualCampaignIdToSave,
       });
     } catch (e) {
-      console.error("[createOrder] attribution audit failed", e);
+      log.error("create_order.attribution_audit_failed", {
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
@@ -683,7 +703,9 @@ export async function updateOrderStatus(
       capiEventId = result.eventId;
       capiPayloadJson = result.payloadJson;
     } catch (e) {
-      console.error("[updateOrderStatus] Meta CAPI failed", e);
+      log.error("update_order_status.capi_failed", {
+        message: e instanceof Error ? e.message : String(e),
+      });
       const message =
         e instanceof Error ? e.message : "Meta CAPI request failed";
       return { ok: false, error: message };
@@ -775,7 +797,9 @@ export async function linkOrderManualCampaign(
         toCampaignId: null,
       });
     } catch (e) {
-      console.error("[linkOrderManualCampaign] attribution audit failed", e);
+      log.error("link_order_campaign.attribution_audit_failed", {
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
 
     revalidatePath("/campaigns");
@@ -816,7 +840,9 @@ export async function linkOrderManualCampaign(
       toCampaignId: metaCampaignId,
     });
   } catch (e) {
-    console.error("[linkOrderManualCampaign] attribution audit failed", e);
+    log.error("link_order_campaign.attribution_audit_failed", {
+      message: e instanceof Error ? e.message : String(e),
+    });
   }
 
   revalidatePath("/campaigns");
@@ -1081,7 +1107,9 @@ export async function resendOrderPurchaseCapi(
       capiPayloadJson: result.payloadJson,
     };
   } catch (e) {
-    console.error("[resendOrderPurchaseCapi] Meta CAPI failed", e);
+    log.error("resend_order_capi.failed", {
+      message: e instanceof Error ? e.message : String(e),
+    });
     const message =
       e instanceof Error ? e.message : "Meta CAPI request failed";
     return { ok: false, error: message };

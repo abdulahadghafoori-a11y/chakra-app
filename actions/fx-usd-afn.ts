@@ -1,12 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 
 import { fetchAfnPerOneUsdFromPublicApis } from "@/lib/fetch-afn-per-usd";
 import { upsertAppFxAfnPerUsd } from "@/lib/app-fx-usd-afn";
-
-/** Allowed without staff login because `/orders/new` is public; rate is global app config. */
+import { assertStaffSession } from "@/lib/staff-auth/guard";
 
 const manualRateSchema = z.object({
   afnPerOneUsd: z
@@ -19,6 +18,11 @@ const manualRateSchema = z.object({
 export async function saveManualAfnPerUsd(
   raw: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await assertStaffSession();
+  } catch {
+    return { ok: false, error: "Unauthorized" };
+  }
   const parsed = manualRateSchema.safeParse(raw);
   if (!parsed.success) {
     return {
@@ -33,12 +37,18 @@ export async function saveManualAfnPerUsd(
     syncedAt: null,
   });
   revalidatePath("/orders/new");
+  revalidateTag("app-fx-usd-afn");
   return { ok: true };
 }
 
 export async function syncAfnPerUsdFromApi(): Promise<
   { ok: true; afnPerOneUsd: number; source: string } | { ok: false; error: string }
 > {
+  try {
+    await assertStaffSession();
+  } catch {
+    return { ok: false, error: "Unauthorized" };
+  }
   try {
     const { afnPerOneUsd, source } = await fetchAfnPerOneUsdFromPublicApis();
     const now = new Date();
@@ -48,6 +58,7 @@ export async function syncAfnPerUsdFromApi(): Promise<
       syncedAt: now,
     });
     revalidatePath("/orders/new");
+    revalidateTag("app-fx-usd-afn");
     return { ok: true, afnPerOneUsd, source };
   } catch (e) {
     const message = e instanceof Error ? e.message : "FX sync failed";

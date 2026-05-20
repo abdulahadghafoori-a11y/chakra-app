@@ -17,6 +17,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card";
+import {
   Table,
   TableBody,
   TableCell,
@@ -56,20 +62,190 @@ function productHref(coreMode: boolean, productId: string) {
     : `/products/${encodeURIComponent(productId)}/agent`;
 }
 
+type OrderRowView = {
+  row: OrderTableRow;
+  items: OrderLineSummary[];
+  totalPrimary: string;
+  totalTitle: string;
+  afnWhole: number | null;
+  deliveryLine: string;
+  tracking: string | null;
+};
+
+function buildOrderRowView(
+  row: OrderTableRow,
+  items: OrderLineSummary[],
+): OrderRowView {
+  const totalPrimary = `${row.currency} ${formatOrderUsdTable(row.value)}`;
+  const afnWhole =
+    row.valueAfn != null && row.valueAfn.trim() !== ""
+      ? Math.round(Number(row.valueAfn))
+      : null;
+  const totalTitle =
+    afnWhole != null ? `${totalPrimary} · AFN ${afnWhole}` : totalPrimary;
+  return {
+    row,
+    items,
+    totalPrimary,
+    totalTitle,
+    afnWhole,
+    deliveryLine: formatOrderDeliveryAddressLine(row),
+    tracking: row.deliveryTrackingNumber?.trim() || null,
+  };
+}
+
 type Props = {
   rows: OrderTableRow[];
   itemsByOrder: Map<string, OrderLineSummary[]>;
   filterContactId?: string;
+  /** Base path for filter links (e.g. `/` or `/orders`). */
+  listBasePath?: string;
   coreMode: boolean;
   searchQuery?: string;
   /** 0-based row index offset for the # column when paginated. */
   rankOffset?: number;
 };
 
+function OrderListCard({
+  view,
+  rank,
+  coreMode,
+  pending,
+  onDelete,
+}: {
+  view: OrderRowView;
+  rank: number;
+  coreMode: boolean;
+  pending: boolean;
+  onDelete: (id: string) => void;
+}) {
+  const { row, items, totalPrimary, totalTitle, afnWhole, deliveryLine, tracking } =
+    view;
+
+  return (
+    <Card className="gap-0 overflow-hidden py-0">
+      <CardHeader className="border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <p className="text-muted-foreground text-xs tabular-nums">#{rank}</p>
+            <Link
+              className="text-primary block truncate font-mono text-sm font-medium underline-offset-2 hover:underline"
+              href={`/orders/${encodeURIComponent(row.id)}`}
+              title={row.id}
+            >
+              {row.id.length > 18 ? `${row.id.slice(0, 16)}…` : row.id}
+            </Link>
+            <Link
+              className="text-muted-foreground block truncate font-mono text-xs underline-offset-2 hover:underline"
+              href={`/contacts?q=${encodeURIComponent(row.phone)}`}
+              title={row.phone}
+            >
+              {row.phone}
+            </Link>
+          </div>
+          <Badge
+            variant="outline"
+            className={cn(
+              "shrink-0 px-1.5 py-0 text-[10px] font-semibold uppercase",
+              orderStatusBadgeClass(row.status),
+            )}
+          >
+            {formatOrderStatusLabel(row.status)}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4 py-3 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground text-xs">Total</span>
+          <span className="text-right font-medium tabular-nums" title={totalTitle}>
+            {totalPrimary}
+            {afnWhole != null ? (
+              <span className="text-muted-foreground block text-xs">
+                AFN {afnWhole.toLocaleString()}
+              </span>
+            ) : null}
+          </span>
+        </div>
+        <div>
+          <p className="text-muted-foreground mb-1 text-xs">Products</p>
+          {items.length === 0 ? (
+            <p className="text-muted-foreground text-xs">—</p>
+          ) : (
+            <ul className="space-y-1">
+              {items.map((it) => {
+                const label = `${it.productName} × ${it.quantity}`;
+                return (
+                  <li key={`${it.orderId}-${it.productId}`}>
+                    <Link
+                      href={productHref(coreMode, it.productId)}
+                      className="text-primary text-xs underline-offset-2 hover:underline"
+                      title={label}
+                    >
+                      {label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+        <div>
+          <p className="text-muted-foreground mb-1 text-xs">Delivery</p>
+          <p className="text-xs leading-snug">{deliveryLine}</p>
+          {tracking ? (
+            <p className="text-muted-foreground mt-0.5 font-mono text-[10px] break-all">
+              {tracking}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs">
+          <span>
+            CAPI{" "}
+            {row.capiSent ? (
+              <Badge variant="default" className="ml-1">
+                sent
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="ml-1">
+                pending
+              </Badge>
+            )}
+          </span>
+          <span className="text-muted-foreground">
+            {formatOrderTableWhen(row.createdAt)}
+          </span>
+        </div>
+      </CardContent>
+      <CardFooter className="flex gap-2 border-t px-4 py-3">
+        <Link
+          href={`/orders/${encodeURIComponent(row.id)}`}
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "min-h-11 flex-1 no-underline",
+          )}
+        >
+          Edit
+        </Link>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          className="min-h-11 flex-1"
+          disabled={pending}
+          onClick={() => onDelete(row.id)}
+        >
+          Delete
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export function OrdersListTable({
   rows,
   itemsByOrder,
   filterContactId,
+  listBasePath = "/",
   coreMode,
   searchQuery,
   rankOffset = 0,
@@ -109,7 +285,7 @@ export function OrdersListTable({
           ·{" "}
           <Link
             className="text-primary underline underline-offset-2"
-            href="/"
+            href={listBasePath}
           >
             Clear filter
           </Link>
@@ -120,37 +296,71 @@ export function OrdersListTable({
           <span className="text-muted-foreground">
             No orders for this contact yet.
           </span>{" "}
-          <Link className="underline underline-offset-2" href="/">
+          <Link className="underline underline-offset-2" href={listBasePath}>
             Show all orders
           </Link>
         </p>
       ) : null}
-      <div className="-mx-3 overflow-x-auto sm:mx-0">
-        <div className="inline-block min-w-full overflow-hidden rounded-xl border align-middle">
-          <Table className="min-w-[56rem]">
+      {rows.length === 0 ? (
+        <p className="text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm md:hidden">
+          {searchQuery?.trim()
+            ? `No orders match “${searchQuery.trim()}”.`
+            : "No orders yet. Create products, then record an order."}
+        </p>
+      ) : (
+        <ul className="space-y-3 md:hidden" aria-label="Orders list">
+          {rows.map((r, rowIndex) => (
+            <li key={r.id}>
+              <OrderListCard
+                view={buildOrderRowView(r, itemsByOrder.get(r.id) ?? [])}
+                rank={rankOffset + rowIndex + 1}
+                coreMode={coreMode}
+                pending={pending}
+                onDelete={setDeleteTargetId}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="hidden md:block">
+        <div className="overflow-hidden rounded-xl border">
+          <Table className="min-w-[56rem]" aria-label="Orders">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10 text-center align-middle tabular-nums">
+                <TableHead scope="col" className="w-10 text-center align-middle tabular-nums">
                   #
                 </TableHead>
-                <TableHead className="text-center align-middle">Order</TableHead>
-                <TableHead className="text-center align-middle">Phone</TableHead>
-                <TableHead className="text-center align-middle">
+                <TableHead scope="col" className="text-center align-middle">
+                  Order
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
+                  Phone
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
                   Products
                 </TableHead>
-                <TableHead className="text-center align-middle min-w-[7rem]">
+                <TableHead scope="col" className="min-w-[7rem] text-center align-middle">
                   Delivery
                 </TableHead>
-                <TableHead className="text-center align-middle">Status</TableHead>
-                <TableHead className="text-center align-middle">Total</TableHead>
-                <TableHead className="text-center align-middle">CAPI</TableHead>
-                <TableHead className="text-center align-middle">
+                <TableHead scope="col" className="text-center align-middle">
+                  Status
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
+                  Total
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
+                  CAPI
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
                   Recorded
                 </TableHead>
-                <TableHead className="text-center align-middle">
+                <TableHead scope="col" className="text-center align-middle">
                   Order event
                 </TableHead>
-                <TableHead className="text-center align-middle">Actions</TableHead>
+                <TableHead scope="col" className="text-center align-middle">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -167,18 +377,18 @@ export function OrdersListTable({
                 </TableRow>
               ) : (
                 rows.map((r, rowIndex) => {
-                  const items = itemsByOrder.get(r.id) ?? [];
-                  const totalPrimary = `${r.currency} ${formatOrderUsdTable(r.value)}`;
-                  const afnWhole =
-                    r.valueAfn != null && r.valueAfn.trim() !== ""
-                      ? Math.round(Number(r.valueAfn))
-                      : null;
-                  const totalTitle =
-                    afnWhole != null
-                      ? `${totalPrimary} · AFN ${afnWhole}`
-                      : totalPrimary;
-                  const deliveryLine = formatOrderDeliveryAddressLine(r);
-                  const tracking = r.deliveryTrackingNumber?.trim() || null;
+                  const view = buildOrderRowView(
+                    r,
+                    itemsByOrder.get(r.id) ?? [],
+                  );
+                  const {
+                    items,
+                    totalPrimary,
+                    totalTitle,
+                    afnWhole,
+                    deliveryLine,
+                    tracking,
+                  } = view;
 
                   return (
                     <TableRow key={r.id}>

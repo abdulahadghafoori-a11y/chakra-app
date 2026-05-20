@@ -1,3 +1,10 @@
+import { redirect } from "next/navigation";
+
+import {
+  filterCampaignPerformance,
+  paginateCampaignPerformance,
+  parseCampaignVerdictFilter,
+} from "@/lib/campaigns-list-page";
 import { parseCampaignPnLFractions } from "@/lib/campaign-pnl-params";
 import { parseCampaignRangeSearchParams } from "@/lib/campaign-insights-range";
 import {
@@ -5,6 +12,7 @@ import {
   getUnattributedOrderTotals,
   getUnlinkedCtwaOrderTotals,
 } from "@/lib/campaigns-rollups";
+import { parseTablePage } from "@/lib/table-pagination";
 import { APP_CURRENCY } from "@/lib/validations/order";
 
 import { CampaignsClient } from "./campaigns-client";
@@ -18,6 +26,8 @@ type SearchParams = {
   days?: string;
   fee_pct?: string;
   sales_pct?: string;
+  page?: string;
+  verdict?: string;
 };
 
 export default async function CampaignsPage({
@@ -28,6 +38,8 @@ export default async function CampaignsPage({
   const sp = await searchParams;
   const parsed = parseCampaignRangeSearchParams(sp);
   const pnlFractions = parseCampaignPnLFractions(sp);
+  const verdictFilter = parseCampaignVerdictFilter(sp.verdict);
+  const requestedPage = parseTablePage(sp.page);
   const [
     performance,
     unattributed,
@@ -43,6 +55,23 @@ export default async function CampaignsPage({
     getUnattributedOrderTotals(parsed.sinceIso, parsed.untilIso),
     getUnlinkedCtwaOrderTotals(parsed.sinceIso, parsed.untilIso),
   ]);
+
+  const filteredPerformance = filterCampaignPerformance(
+    performance,
+    verdictFilter,
+  );
+  const campaignsPage = paginateCampaignPerformance(
+    filteredPerformance,
+    requestedPage,
+  );
+  if (campaignsPage.total > 0 && requestedPage !== campaignsPage.page) {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) {
+      if (v != null && v !== "" && k !== "page") p.set(k, v);
+    }
+    p.set("page", String(campaignsPage.page));
+    redirect(`/campaigns?${p.toString()}`);
+  }
 
   const totals = performance.reduce(
     (acc, r) => ({
@@ -90,7 +119,7 @@ export default async function CampaignsPage({
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6 px-3 py-6 sm:px-4 sm:py-8">
       <header className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">
           Campaigns (Meta)
@@ -120,7 +149,13 @@ export default async function CampaignsPage({
       </header>
 
       <CampaignsClient
-        performance={performance}
+        performanceCount={performance.length}
+        campaignRows={campaignsPage.pageRows}
+        campaignPage={campaignsPage.page}
+        campaignPageCount={campaignsPage.pageCount}
+        campaignTotal={campaignsPage.total}
+        campaignRankOffset={campaignsPage.rankOffset}
+        verdictFilter={verdictFilter}
         totals={totals}
         unattributed={unattributed}
         unlinkedCtwaOrders={unlinkedCtwaOrders}

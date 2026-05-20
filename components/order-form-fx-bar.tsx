@@ -33,12 +33,7 @@ export function OrderFormFxBar({
     if (initialFx && initialFx.afnPerOneUsd > 0) {
       setManualText(String(initialFx.afnPerOneUsd));
     }
-  }, [
-    initialFx?.afnPerOneUsd,
-    initialFx?.rateSource,
-    initialFx?.syncedAt,
-    initialFx?.updatedAt,
-  ]);
+  }, [initialFx]);
 
   const sourceLabel = useMemo(() => {
     if (!initialFx) return "—";

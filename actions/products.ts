@@ -1,7 +1,7 @@
 "use server";
 
 import { count, desc, eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -181,6 +181,7 @@ export async function createProduct(
   revalidatePath("/orders");
   revalidatePath("/products");
   revalidatePath("/orders/new");
+  revalidateTag("products-catalog");
   return { ok: true };
 }
 
@@ -236,6 +237,7 @@ export async function updateProductAgentFields(
 
   revalidatePath("/products");
   revalidatePath(`/products/${parsed.data.id}/agent`);
+  revalidateTag("products-catalog");
   return { ok: true };
 }
 

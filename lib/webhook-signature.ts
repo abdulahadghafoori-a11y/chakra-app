@@ -82,10 +82,15 @@ export function verifyWhatsAppWebhookPost(
     }
   }
 
-  if (
-    metaSecrets.length === 0 &&
-    !chakraSecret
-  ) {
+  if (metaSecrets.length === 0 && !chakraSecret) {
+    if (process.env.NODE_ENV === "production") {
+      return {
+        ok: false,
+        reason: "Webhook secrets not configured",
+        detail:
+          "Set META_APP_SECRET and/or CHAKRA_WEBHOOK_SECRET in production. Unsigned webhook POSTs are rejected.",
+      };
+    }
     return { ok: true };
   }
 

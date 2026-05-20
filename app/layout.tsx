@@ -17,9 +17,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Chakra App",
+  title: {
+    default: "Chakra App",
+    template: "%s · Chakra App",
+  },
   description:
     "WhatsApp orders, Click-to-WhatsApp sessions, and Meta Conversions API",
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
@@ -42,8 +46,18 @@ export default function RootLayout({
     >
       <body className="bg-background text-foreground flex min-h-dvh min-h-[100svh] flex-col touch-manipulation font-sans antialiased">
         <Providers>
+          <a
+            href="#main-content"
+            className="bg-primary text-primary-foreground focus:not-sr-only sr-only fixed top-2 left-2 z-[100] rounded-lg px-3 py-2 text-sm font-medium shadow-lg focus:static focus:m-3"
+          >
+            Skip to main content
+          </a>
           <SiteHeader />
-          <main className="flex-1 px-3 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-8">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 px-3 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-8"
+          >
             {children}
           </main>
         </Providers>

@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { sort?: string; q?: string; page?: string };
+type SearchParams = { sort?: string; q?: string; page?: string; contactId?: string };
 
 export default async function OrdersIndexPage({
   searchParams,
@@ -31,6 +31,7 @@ export default async function OrdersIndexPage({
   const sp = await searchParams;
   const sort = parseOrdersTableSort(sp.sort);
   const searchQuery = sp.q?.trim() ?? "";
+  const filterContactId = sp.contactId?.trim() || undefined;
   const requestedPage = parseTablePage(sp.page);
   const coreMode = isCoreFeatureSet();
   const { rows: orderRows, total, page } = await loadOrdersTableRows({
@@ -38,10 +39,12 @@ export default async function OrdersIndexPage({
     pageSize: ORDERS_TABLE_PAGE_SIZE,
     sort,
     search: searchQuery || undefined,
+    filterContactId,
   });
   if (total > 0 && requestedPage !== page) {
     const p = new URLSearchParams();
     if (searchQuery) p.set("q", searchQuery);
+    if (filterContactId) p.set("contactId", filterContactId);
     p.set("sort", sort);
     p.set("page", String(page));
     redirect(`/orders?${p.toString()}`);
@@ -67,7 +70,7 @@ export default async function OrdersIndexPage({
           <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
             <OrdersSearchToolbar
               initialQuery={searchQuery}
-              preserveKeys={["sort"]}
+              preserveKeys={["sort", "contactId"]}
             />
             <OrdersSortToolbar sort={sort} />
           </div>
@@ -85,6 +88,8 @@ export default async function OrdersIndexPage({
       <OrdersListTable
         rows={orderRows}
         itemsByOrder={itemsByOrder}
+        filterContactId={filterContactId}
+        listBasePath="/orders"
         coreMode={coreMode}
         searchQuery={searchQuery}
         rankOffset={rankOffset}
@@ -94,7 +99,7 @@ export default async function OrdersIndexPage({
         pageCount={pageCount}
         total={total}
         itemLabel="orders"
-        preserveKeys={["sort", "q"]}
+        preserveKeys={["sort", "q", "contactId"]}
       />
     </div>
   );
