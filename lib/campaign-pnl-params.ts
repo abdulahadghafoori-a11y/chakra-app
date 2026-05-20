@@ -1,7 +1,7 @@
 /** Default card surcharge Meta spend (e.g. 3 = payable ad cost is Insights spend × 1.03). */
 export const DEFAULT_CAMPAIGN_CARD_FEE_PERCENT = 3;
 
-/** Default sales commission taken from converted revenue (paid + confirmed) for net profit. */
+/** Default sales commission taken from converted revenue (paid, confirmed, shipped) for net profit. */
 export const DEFAULT_CAMPAIGN_SALES_COMMISSION_PERCENT = 2;
 
 /** Max sensible card fee (prevent fat-finger totals). */

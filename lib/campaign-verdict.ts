@@ -203,7 +203,7 @@ function maybeScaleConfidenceNotes(
   ) {
     reasons.push({
       code: "paid_orders_below_min",
-      message: `Only ${m.convertedOrdersCount} converted order(s) (paid + confirmed)—need at least ${t.minPaidOrdersToScale} for scale confidence.`,
+      message: `Only ${m.convertedOrdersCount} converted order(s) (paid, confirmed, shipped)—need at least ${t.minPaidOrdersToScale} for scale confidence.`,
     });
   }
   if (
@@ -556,7 +556,7 @@ export function evaluateCampaign(
     reasons.push({
       code: "negative_contribution_with_data",
       message:
-        "Converted gross profit (paid + confirmed) minus payable ad spend (card surcharge applied), sales commission, and delivery cost is negative with enough orders to judge.",
+        "Converted gross profit (paid, confirmed, shipped) minus payable ad spend (card surcharge applied), sales commission, and delivery cost is negative with enough orders to judge.",
     });
     return {
       verdict: "KILL",
@@ -591,7 +591,7 @@ export function evaluateCampaign(
     reasons.push({
       code: "pending_revenue_too_high",
       message:
-        "Most attributed revenue is outside paid + confirmed—do not scale until more orders convert.",
+        "Most attributed revenue is outside converted statuses—do not scale until more orders convert.",
     });
     return {
       verdict: "KEEP",
@@ -631,7 +631,7 @@ export function evaluateCampaign(
     reasons.push({
       code: "low_paid_conversion",
       message:
-        "Orders exist but paid + confirmed rate from CTWA is weak—COD confirmation or fulfillment may be the bottleneck.",
+        "Orders exist but converted rate from CTWA is weak—COD confirmation or fulfillment may be the bottleneck.",
     });
     appendEngagementAndQualityNotes(m, t, signals, reasons, opts);
     return {

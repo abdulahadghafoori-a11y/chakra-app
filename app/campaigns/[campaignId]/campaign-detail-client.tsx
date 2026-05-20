@@ -366,7 +366,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
             <p className="text-muted-foreground mt-1 text-xs">
               {props.attributionSplit.ctwa.ordersCount} orders (excl. cancelled/
               returned) · {props.attributionSplit.ctwa.convertedOrdersCount}{" "}
-              converted (paid + confirmed)
+              converted (paid, confirmed, shipped)
             </p>
           </div>
           <div className="rounded-lg border p-4">
@@ -380,7 +380,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               {props.attributionSplit.manual.ordersCount} orders (excl.
               cancelled/returned) ·{" "}
               {props.attributionSplit.manual.convertedOrdersCount} converted
-              (paid + confirmed)
+              (paid, confirmed, shipped)
             </p>
           </div>
         </CardContent>
@@ -390,8 +390,8 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
         <CardHeader>
           <CardTitle className="text-base">Daily performance (UTC)</CardTitle>
           <CardDescription>
-            Merged Meta Insights rows with app economics (converted revenue uses paid +
-            confirmed).
+            Merged Meta Insights rows with app economics (converted revenue uses paid,
+            confirmed, and shipped).
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -589,7 +589,7 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                       </span>
                       <span
                         className="text-muted-foreground font-normal"
-                        title="Converted (paid + confirmed)"
+                        title="Converted (paid, confirmed, shipped)"
                       >
                         {a.convertedOrdersCount} conv. ({a.paidOrdersCount} paid
                         · {a.confirmedOrdersCount} conf.)

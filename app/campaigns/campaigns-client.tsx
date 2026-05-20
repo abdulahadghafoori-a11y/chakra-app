@@ -368,7 +368,8 @@ export function CampaignsClient({
             </CardTitle>
             <p className="text-muted-foreground text-xs font-normal leading-snug">
               Pending, confirmed, shipped, and paid — excludes cancelled and
-              returned. Converted (paid + confirmed): {totals.convertedOrdersCount}
+              returned. Converted (paid, confirmed, shipped):{" "}
+              {totals.convertedOrdersCount}
               · Paid only: {totals.paidOrdersCount} · Meta purchases (Insights,
               diagnostic): {totals.metaPurchases}
             </p>
@@ -418,7 +419,7 @@ export function CampaignsClient({
               −{formatMoney(totals.paidOperationalCosts)}
             </CardTitle>
             <p className="text-muted-foreground text-xs font-normal leading-snug">
-              Sum of per-order delivery on paid + confirmed orders (
+              Sum of per-order delivery on converted orders (
               <code className="text-[10px]">delivery_cost</code>, {APP_CURRENCY}
               ).
             </p>
@@ -811,7 +812,7 @@ export function CampaignsClient({
                             </span>
                             <span
                               className="text-muted-foreground font-normal"
-                              title="Converted orders (paid + confirmed) for P&amp;L"
+                              title="Converted orders (paid, confirmed, shipped) for P&amp;L"
                             >
                               {r.convertedOrdersCount} conv. ({r.paidOrdersCount}{" "}
                               paid · {r.confirmedOrdersCount} conf.

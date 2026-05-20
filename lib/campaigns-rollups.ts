@@ -27,6 +27,10 @@ import {
   type CampaignVerdictResult,
 } from "@/lib/campaign-verdict";
 import {
+  CAMPAIGN_CONVERTED_ORDER_STATUSES,
+  sqlCampaignConvertedDeliverySum,
+  sqlCampaignConvertedOrdersCount,
+  sqlCampaignConvertedRevenueSum,
   sqlCampaignTotalDistinctOrdersCount,
   sqlCampaignTotalOrdersCount,
 } from "@/lib/campaign-order-counts";
@@ -248,10 +252,8 @@ export async function rollupAttributedOrdersAggByAdForCampaign(
         sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
-      convertedOrdersCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedOrdersCount: sqlCampaignConvertedOrdersCount,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
       capiSentCount:
         sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
     })
@@ -313,7 +315,7 @@ export async function rollupLineCogsByAdForCampaign(
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed', 'shipped')), 0)::text`,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -354,7 +356,7 @@ export async function rollupPaidOperationalCostsByAdForCampaign(
   const feeRows = await db
     .select({
       metaAdId: metaAds.id,
-      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      fees: sqlCampaignConvertedDeliverySum,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -418,7 +420,7 @@ export async function rollupAdInsightsDeliveryByCampaign(
 }
 
 /**
- * Sum `orders.delivery_cost` for paid + confirmed CTWA-attributed orders in the window
+ * Sum `orders.delivery_cost` for converted CTWA-attributed orders in the window
  * (used as delivery deduction in net profit).
  */
 export async function rollupPaidOperationalCostsByCampaign(
@@ -431,7 +433,7 @@ export async function rollupPaidOperationalCostsByCampaign(
   const feeRows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
-      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      fees: sqlCampaignConvertedDeliverySum,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -442,7 +444,7 @@ export async function rollupPaidOperationalCostsByCampaign(
   const manualFeeRows = await db
     .select({
       metaCampaignId: metaCampaigns.id,
-      fees: sql<string>`coalesce(sum(coalesce(${orders.deliveryCost}::numeric, 0)) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      fees: sqlCampaignConvertedDeliverySum,
     })
     .from(orders)
     .innerJoin(
@@ -482,7 +484,7 @@ export type OrderAggRow = {
   returnedOrdersCount: number;
   totalRevenue: number;
   paidRevenue: number;
-  /** Orders with status paid or confirmed — used with revenue/cogs for COD decisions. */
+  /** Orders with status paid, confirmed, or shipped — used with revenue/cogs for COD decisions. */
   convertedOrdersCount: number;
   convertedRevenue: number;
   capiSentCount: number;
@@ -547,10 +549,8 @@ export async function rollupAttributedOrdersAggByCampaign(
         sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
-      convertedOrdersCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedOrdersCount: sqlCampaignConvertedOrdersCount,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
       capiSentCount:
         sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
     })
@@ -582,10 +582,8 @@ export async function rollupAttributedOrdersAggByCampaign(
         sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
-      convertedOrdersCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedOrdersCount: sqlCampaignConvertedOrdersCount,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
       capiSentCount:
         sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
     })
@@ -672,7 +670,7 @@ export async function rollupLineCogsByCampaign(
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed', 'shipped')), 0)::text`,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -689,7 +687,7 @@ export async function rollupLineCogsByCampaign(
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed', 'shipped')), 0)::text`,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -758,7 +756,7 @@ export type CampaignPerformanceRow = {
   totalLineCogs: number;
   paidLineCogs: number;
   convertedLineCogs: number;
-  /** Sum of `orders.delivery_cost` on paid + confirmed orders in this window (deducted from net). */
+  /** Sum of `orders.delivery_cost` on converted orders in this window (deducted from net). */
   paidOperationalCosts: number;
   impressions: number;
   clicks: number;
@@ -971,12 +969,10 @@ export async function rollupConvertedEconomyByCampaignByDayCtwa(
       metaCampaignId: metaAds.metaCampaignId,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
       ordersCount: sqlCampaignTotalDistinctOrdersCount,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
       convertedCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
-      deliveryCost:
-        sql<string>`coalesce(sum(${orders.deliveryCost}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed', 'shipped')), 0)::text`,
+      deliveryCost: sqlCampaignConvertedDeliverySum,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -1016,12 +1012,10 @@ export async function rollupConvertedEconomyByCampaignByDayManual(
       metaCampaignId: metaCampaigns.id,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
       ordersCount: sqlCampaignTotalDistinctOrdersCount,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
       convertedCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
-      deliveryCost:
-        sql<string>`coalesce(sum(${orders.deliveryCost}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} in ('paid', 'confirmed', 'shipped')), 0)::text`,
+      deliveryCost: sqlCampaignConvertedDeliverySum,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -1131,7 +1125,7 @@ async function rollupAvgOrderToConfirmLagByCampaignCtwa(
       and(
         gte(orders.orderEventAt, since),
         lte(orders.orderEventAt, until),
-        inArray(orders.status, ["paid", "confirmed"]),
+        inArray(orders.status, [...CAMPAIGN_CONVERTED_ORDER_STATUSES]),
       ),
     )
     .groupBy(metaAds.metaCampaignId);
@@ -1169,7 +1163,7 @@ async function rollupAvgOrderToConfirmLagByCampaignManual(
         isNotNull(orders.manualMetaCampaignId),
         gte(orders.orderEventAt, since),
         lte(orders.orderEventAt, until),
-        inArray(orders.status, ["paid", "confirmed"]),
+        inArray(orders.status, [...CAMPAIGN_CONVERTED_ORDER_STATUSES]),
       ),
     )
     .groupBy(metaCampaigns.id);
@@ -1184,7 +1178,7 @@ async function rollupAvgOrderToConfirmLagByCampaignManual(
   return m;
 }
 
-/** Mean days from order `order_event_at` to `updated_at` for paid+confirmed (proxy for confirmation delay). */
+/** Mean days from order `order_event_at` to `updated_at` for converted statuses (proxy for confirmation delay). */
 export async function rollupAvgOrderToConfirmLagByCampaign(
   sinceIso: string,
   untilIso: string,

@@ -21,7 +21,11 @@ import {
   orders,
 } from "@/drizzle/schema";
 import { META_MARKETING_API_ACTIVITY_EMAIL } from "@/lib/campaign-activity";
-import { sqlCampaignTotalOrdersCount } from "@/lib/campaign-order-counts";
+import {
+  sqlCampaignConvertedOrdersCount,
+  sqlCampaignConvertedRevenueSum,
+  sqlCampaignTotalOrdersCount,
+} from "@/lib/campaign-order-counts";
 import {
   addUtcDaysToDateOnly,
   daysBetweenInclusive,
@@ -257,7 +261,7 @@ export function computeCampaignOperationalWarnings(
   }
   if (primary.spend > 0 && primary.convertedOrdersCount === 0) {
     w.push(
-      "Meta spend recorded but zero converted orders (paid + confirmed) in this window.",
+      "Meta spend recorded but zero converted orders (paid, confirmed, shipped) in this window.",
     );
   }
   if (primary.convertedRevenue > 0 && primary.spend <= 0) {
@@ -292,10 +296,8 @@ export async function getCampaignAttributionSplit(
   const [ctwaRow] = await db
     .select({
       ordersCount: sqlCampaignTotalOrdersCount,
-      convertedOrdersCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedOrdersCount: sqlCampaignConvertedOrdersCount,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -311,10 +313,8 @@ export async function getCampaignAttributionSplit(
   const [manualRow] = await db
     .select({
       ordersCount: sqlCampaignTotalOrdersCount,
-      convertedOrdersCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
-      convertedRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
+      convertedOrdersCount: sqlCampaignConvertedOrdersCount,
+      convertedRevenue: sqlCampaignConvertedRevenueSum,
     })
     .from(orders)
     .where(
