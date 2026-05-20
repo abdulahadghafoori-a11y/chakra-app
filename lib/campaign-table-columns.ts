@@ -3,7 +3,7 @@ export const CAMPAIGN_TABLE_COLUMNS = [
   { id: "paidAds", label: "Payable ads" },
   { id: "ctwa", label: "CTWA sessions" },
   { id: "messaging", label: "Messaging started" },
-  { id: "converted", label: "Converted / Meta" },
+  { id: "converted", label: "Orders" },
   { id: "pending", label: "Pending" },
   { id: "convRevenue", label: "Converted revenue" },
   { id: "gross", label: "Gross profit" },

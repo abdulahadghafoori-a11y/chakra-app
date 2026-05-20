@@ -91,9 +91,10 @@ export default async function CampaignsPage({
           Campaigns (Meta)
         </h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          COD cockpit: <strong>app</strong> CTWA sessions and{" "}
-          <strong>converted orders</strong> (paid + confirmed) drive attribution
-          and P&amp;L. Money uses <strong>{APP_CURRENCY}</strong> (
+          COD cockpit: <strong>app</strong> CTWA sessions and attributed{" "}
+          <strong>orders</strong> (pending, confirmed, shipped, paid — not
+          cancelled or returned) for volume; <strong>converted</strong> (paid +
+          confirmed) drives revenue and P&amp;L. Money uses <strong>{APP_CURRENCY}</strong> (
           <code className="bg-muted rounded px-1">APP_CURRENCY</code>). Set{" "}
           <strong>card surcharge</strong> on Meta Insights spend (<code className="bg-muted rounded px-1">
             fee_pct

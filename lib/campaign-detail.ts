@@ -21,6 +21,7 @@ import {
   orders,
 } from "@/drizzle/schema";
 import { META_MARKETING_API_ACTIVITY_EMAIL } from "@/lib/campaign-activity";
+import { sqlCampaignTotalOrdersCount } from "@/lib/campaign-order-counts";
 import {
   addUtcDaysToDateOnly,
   daysBetweenInclusive,
@@ -290,7 +291,7 @@ export async function getCampaignAttributionSplit(
 
   const [ctwaRow] = await db
     .select({
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
       convertedOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
       convertedRevenue:
@@ -309,7 +310,7 @@ export async function getCampaignAttributionSplit(
 
   const [manualRow] = await db
     .select({
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
       convertedOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} in ('paid', 'confirmed'))::int`,
       convertedRevenue:

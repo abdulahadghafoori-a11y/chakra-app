@@ -362,17 +362,15 @@ export function CampaignsClient({
         </Card>
         <Card className="py-3">
           <CardHeader className="px-4 pb-1 pt-0">
-            <CardDescription>Orders / purchases</CardDescription>
+            <CardDescription>Attributed orders</CardDescription>
             <CardTitle className="text-lg tabular-nums">
-              {totals.convertedOrdersCount}{" "}
-              <span className="text-muted-foreground text-sm font-normal">
-                paid + confirmed
-              </span>
+              {totals.ordersCount}
             </CardTitle>
             <p className="text-muted-foreground text-xs font-normal leading-snug">
-              Paid only: {totals.paidOrdersCount} · Attrib. orders:{" "}
-              {totals.ordersCount} · Meta purchases (Insights, diagnostic only):{" "}
-              {totals.metaPurchases}
+              Pending, confirmed, shipped, and paid — excludes cancelled and
+              returned. Converted (paid + confirmed): {totals.convertedOrdersCount}
+              · Paid only: {totals.paidOrdersCount} · Meta purchases (Insights,
+              diagnostic): {totals.metaPurchases}
             </p>
           </CardHeader>
         </Card>
@@ -596,9 +594,9 @@ export function CampaignsClient({
                   ) : null}
                   {col("converted") ? (
                   <TableHead className="text-right">
-                    <span className="block leading-tight">Converted / Meta</span>
+                    <span className="block leading-tight">Orders</span>
                     <span className="text-muted-foreground block text-[10px] font-normal normal-case">
-                      paid + conf · Meta purch. diag.
+                      excl. cancelled/returned
                     </span>
                   </TableHead>
                   ) : null}
@@ -805,12 +803,22 @@ export function CampaignsClient({
                         {col("converted") ? (
                         <TableCell className="text-right align-top">
                           <div className="flex flex-col items-end gap-0.5 text-xs tabular-nums">
-                            <span title="Converted orders (paid + confirmed)">
-                              {r.convertedOrdersCount} conv.
+                            <span
+                              className="text-sm font-medium"
+                              title="Attributed orders: pending, confirmed, shipped, paid (not cancelled or returned)"
+                            >
+                              {r.ordersCount}
                             </span>
-                            <span className="text-muted-foreground font-normal">
-                              ({r.paidOrdersCount} paid ·{" "}
-                              {r.confirmedOrdersCount} conf.)
+                            <span
+                              className="text-muted-foreground font-normal"
+                              title="Converted orders (paid + confirmed) for P&amp;L"
+                            >
+                              {r.convertedOrdersCount} conv. ({r.paidOrdersCount}{" "}
+                              paid · {r.confirmedOrdersCount} conf.
+                              {r.shippedOrdersCount > 0
+                                ? ` · ${r.shippedOrdersCount} shipped`
+                                : ""}
+                              )
                             </span>
                             <span
                               className="text-muted-foreground"

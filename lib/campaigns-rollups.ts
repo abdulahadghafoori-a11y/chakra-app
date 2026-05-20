@@ -26,6 +26,10 @@ import {
   type CampaignVerdict,
   type CampaignVerdictResult,
 } from "@/lib/campaign-verdict";
+import {
+  sqlCampaignTotalDistinctOrdersCount,
+  sqlCampaignTotalOrdersCount,
+} from "@/lib/campaign-order-counts";
 
 function num(s: string | null | undefined): number {
   if (s == null || s === "") return 0;
@@ -51,7 +55,7 @@ export async function rollupRevenueByCampaign(
       metaCampaignId: metaAds.metaCampaignId,
       campaignName: metaCampaigns.name,
       revenue: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -65,7 +69,7 @@ export async function rollupRevenueByCampaign(
       metaCampaignId: metaCampaigns.id,
       campaignName: metaCampaigns.name,
       revenue: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
     })
     .from(orders)
     .innerJoin(
@@ -227,7 +231,7 @@ export async function rollupAttributedOrdersAggByAdForCampaign(
   const rows = await db
     .select({
       metaAdId: metaAds.id,
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
       paidOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'paid')::int`,
       pendingOrdersCount:
@@ -526,7 +530,7 @@ export async function rollupAttributedOrdersAggByCampaign(
     .select({
       metaCampaignId: metaAds.metaCampaignId,
       campaignName: metaCampaigns.name,
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
       paidOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'paid')::int`,
       pendingOrdersCount:
@@ -561,7 +565,7 @@ export async function rollupAttributedOrdersAggByCampaign(
     .select({
       metaCampaignId: metaCampaigns.id,
       campaignName: metaCampaigns.name,
-      ordersCount: sql<number>`count(${orders.id})::int`,
+      ordersCount: sqlCampaignTotalOrdersCount,
       paidOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'paid')::int`,
       pendingOrdersCount:
@@ -966,7 +970,7 @@ export async function rollupConvertedEconomyByCampaignByDayCtwa(
     .select({
       metaCampaignId: metaAds.metaCampaignId,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
-      ordersCount: sql<number>`count(distinct ${orders.id})::int`,
+      ordersCount: sqlCampaignTotalDistinctOrdersCount,
       convertedRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
       convertedCogs:
@@ -1011,7 +1015,7 @@ export async function rollupConvertedEconomyByCampaignByDayManual(
     .select({
       metaCampaignId: metaCampaigns.id,
       day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
-      ordersCount: sql<number>`count(distinct ${orders.id})::int`,
+      ordersCount: sqlCampaignTotalDistinctOrdersCount,
       convertedRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} in ('paid', 'confirmed')), 0)::text`,
       convertedCogs:
@@ -1494,7 +1498,7 @@ export async function getUnattributedOrderTotals(
 ): Promise<{ ordersCount: number; revenue: number }> {
   const [row] = await db
     .select({
-      c: sql<number>`count(${orders.id})::int`,
+      c: sqlCampaignTotalOrdersCount,
       rev: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
     })
     .from(orders)
@@ -1519,7 +1523,7 @@ export async function getUnlinkedCtwaOrderTotals(
 ): Promise<{ ordersCount: number; revenue: number }> {
   const [row] = await db
     .select({
-      c: sql<number>`count(${orders.id})::int`,
+      c: sqlCampaignTotalOrdersCount,
       rev: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
     })
     .from(orders)

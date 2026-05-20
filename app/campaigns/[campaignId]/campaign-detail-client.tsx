@@ -364,8 +364,9 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               {formatMoney(props.attributionSplit.ctwa.convertedRevenue)}
             </p>
             <p className="text-muted-foreground mt-1 text-xs">
-              {props.attributionSplit.ctwa.convertedOrdersCount} converted ·{" "}
-              {props.attributionSplit.ctwa.ordersCount} total orders
+              {props.attributionSplit.ctwa.ordersCount} orders (excl. cancelled/
+              returned) · {props.attributionSplit.ctwa.convertedOrdersCount}{" "}
+              converted (paid + confirmed)
             </p>
           </div>
           <div className="rounded-lg border p-4">
@@ -376,8 +377,10 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
               {formatMoney(props.attributionSplit.manual.convertedRevenue)}
             </p>
             <p className="text-muted-foreground mt-1 text-xs">
-              {props.attributionSplit.manual.convertedOrdersCount} converted ·{" "}
-              {props.attributionSplit.manual.ordersCount} total orders
+              {props.attributionSplit.manual.ordersCount} orders (excl.
+              cancelled/returned) ·{" "}
+              {props.attributionSplit.manual.convertedOrdersCount} converted
+              (paid + confirmed)
             </p>
           </div>
         </CardContent>
@@ -495,9 +498,9 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                   </span>
                 </TableHead>
                 <TableHead className="text-right">
-                  <span className="block">Converted</span>
+                  <span className="block">Orders</span>
                   <span className="text-muted-foreground block text-[10px] font-normal normal-case">
-                    / Meta
+                    excl. cancelled/returned
                   </span>
                 </TableHead>
                 <TableHead className="text-right">Pending</TableHead>
@@ -578,12 +581,18 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                   </TableCell>
                   <TableCell className="text-right align-top">
                     <div className="flex flex-col items-end gap-0.5 text-[11px] tabular-nums">
-                      <span title="Converted orders (paid + confirmed)">
-                        {a.convertedOrdersCount} conv.
+                      <span
+                        className="text-sm font-medium"
+                        title="Attributed orders: pending, confirmed, shipped, paid"
+                      >
+                        {a.ordersCount}
                       </span>
-                      <span className="text-muted-foreground font-normal">
-                        ({a.paidOrdersCount} paid · {a.confirmedOrdersCount}{" "}
-                        conf.)
+                      <span
+                        className="text-muted-foreground font-normal"
+                        title="Converted (paid + confirmed)"
+                      >
+                        {a.convertedOrdersCount} conv. ({a.paidOrdersCount} paid
+                        · {a.confirmedOrdersCount} conf.)
                       </span>
                       <span
                         className="text-muted-foreground"
