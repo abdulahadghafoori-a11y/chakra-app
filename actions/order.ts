@@ -549,7 +549,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
-  if (manualCampaignIdToSave && !latestSession?.id) {
+  if (manualCampaignIdToSave && !ctwa.ctwaSessionId) {
     try {
       await recordManualCampaignAttributionChange({
         actorEmail: "public-order-create",
