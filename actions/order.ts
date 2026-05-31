@@ -1,12 +1,11 @@
 "use server";
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 
 import {
   contacts,
-  ctwaSessions,
   metaCampaigns,
   orderItems,
   orders,
@@ -37,6 +36,7 @@ import { e164ToDigits } from "@/lib/phone";
 import {
   buildMetaPurchaseParamsFromContext,
   loadOrderPurchaseCapiContext,
+  resolveContactCtwaForCapi,
 } from "@/lib/order-meta-capi";
 import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
 import { recordManualCampaignAttributionChange } from "@/lib/campaign-activity";
@@ -78,6 +78,27 @@ const CAPI_DEFERRED_PAYLOAD_JSON = JSON.stringify(
   null,
   2,
 );
+
+async function validateOptionalManualMetaCampaign(
+  manualMetaCampaignId: string | undefined,
+): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+  const mc = manualMetaCampaignId?.trim() ?? "";
+  if (!mc) return { ok: true, id: null };
+
+  const [campRow] = await db
+    .select({ id: metaCampaigns.id })
+    .from(metaCampaigns)
+    .where(eq(metaCampaigns.id, mc))
+    .limit(1);
+  if (!campRow) {
+    return {
+      ok: false,
+      error:
+        "Selected Meta campaign was not found. Sync from Meta on Campaigns, then retry.",
+    };
+  }
+  return { ok: true, id: mc };
+}
 
 async function resolveOrderUsdAfnRate(): Promise<
   { afnPerOneUsd: number; snapshot: string } | { error: string }
@@ -186,51 +207,17 @@ export async function previewOrderCapiPayload(
     };
   }
 
-  const [latestSession] = await db
-    .select()
-    .from(ctwaSessions)
-    .where(eq(ctwaSessions.contactId, contact.id))
-    .orderBy(desc(ctwaSessions.sendTime))
-    .limit(1);
+  const manualCamp = await validateOptionalManualMetaCampaign(
+    data.manualMetaCampaignId,
+  );
+  if (!manualCamp.ok) return manualCamp;
 
-  if (!latestSession?.id) {
-    const [anyCampaign] = await db
-      .select({ id: metaCampaigns.id })
-      .from(metaCampaigns)
-      .limit(1);
-    const mc = data.manualMetaCampaignId?.trim() ?? "";
-
-    if (!mc) {
-      if (!anyCampaign) {
-        return {
-          ok: false,
-          error:
-            "This contact has no WhatsApp CTWA session. Open Campaigns and run Sync from Meta, then choose a Meta campaign before previewing.",
-        };
-      }
-      return {
-        ok: false,
-        error:
-          "Select a Meta campaign. Orders without a WhatsApp CTWA session must be attributed manually.",
-      };
-    }
-
-    const [campRow] = await db
-      .select({ id: metaCampaigns.id })
-      .from(metaCampaigns)
-      .where(eq(metaCampaigns.id, mc))
-      .limit(1);
-    if (!campRow) {
-      return {
-        ok: false,
-        error:
-          "Selected Meta campaign was not found. Sync from Meta on Campaigns, then retry.",
-      };
-    }
-  }
-
-  const ctwaClid = latestSession?.ctwaClid?.trim() || null;
-  const wabaId = latestSession?.wabaId ?? null;
+  const ctwa = await resolveContactCtwaForCapi(
+    contact.id,
+    data.ctwaSessionId,
+  );
+  const ctwaClid = ctwa.ctwaClid;
+  const wabaId = ctwa.wabaId;
 
   if (process.env.NODE_ENV !== "production") {
     if (!process.env.META_TEST_EVENT_CODE?.trim()) {
@@ -425,51 +412,20 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
-  const [latestSession] = await db
-    .select()
-    .from(ctwaSessions)
-    .where(eq(ctwaSessions.contactId, contact.id))
-    .orderBy(desc(ctwaSessions.sendTime))
-    .limit(1);
+  const ctwa = await resolveContactCtwaForCapi(
+    contact.id,
+    data.ctwaSessionId,
+  );
 
-  let manualCampaignIdToSave: string | null = null;
-  if (!latestSession?.id) {
-    const [anyCampaign] = await db
-      .select({ id: metaCampaigns.id })
-      .from(metaCampaigns)
-      .limit(1);
+  const manualCamp = await validateOptionalManualMetaCampaign(
+    data.manualMetaCampaignId,
+  );
+  if (!manualCamp.ok) return manualCamp;
 
-    const mc = data.manualMetaCampaignId?.trim() ?? "";
-
-    if (!mc) {
-      if (!anyCampaign) {
-        return {
-          ok: false,
-          error:
-            "This contact has no WhatsApp CTWA session. Open Campaigns and run Sync from Meta, then select a Meta campaign for this order.",
-        };
-      }
-      return {
-        ok: false,
-        error:
-          "Select a Meta campaign. Orders without a WhatsApp CTWA session must be attributed manually.",
-      };
-    }
-
-    const [campRow] = await db
-      .select({ id: metaCampaigns.id })
-      .from(metaCampaigns)
-      .where(eq(metaCampaigns.id, mc))
-      .limit(1);
-    if (!campRow) {
-      return {
-        ok: false,
-        error:
-          "Selected Meta campaign was not found. Sync from Meta on Campaigns, then retry.",
-      };
-    }
-    manualCampaignIdToSave = mc;
-  }
+  /** P&amp;L manual attribution only when the contact has no CTWA sessions at all. */
+  const manualCampaignIdToSave = ctwa.ctwaSessionId
+    ? null
+    : manualCamp.id;
 
   const provinceToSave =
     data.interProvinceAfghanistanDelivery &&
@@ -482,8 +438,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       ? data.deliveryTrackingNumber.trim()
       : null;
 
-  const ctwaClid = latestSession?.ctwaClid?.trim() || null;
-  const wabaId = latestSession?.wabaId ?? null;
+  const ctwaClid = ctwa.ctwaClid;
+  const wabaId = ctwa.wabaId;
   const capiEligible = orderStatusEligibleForPurchaseCapi(data.status);
 
   let eventId = "";
@@ -536,7 +492,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     .values({
       id: orderPk,
       contactId: contact.id,
-      ctwaSessionId: latestSession?.id ?? null,
+      ctwaSessionId: ctwa.ctwaSessionId,
       manualMetaCampaignId: manualCampaignIdToSave,
       value: formatUsd2(orderTotal),
       currency: APP_CURRENCY,
@@ -608,7 +564,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     }
   }
 
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");
   revalidatePath("/orders/new");
   revalidatePath(`/orders/${orderPk}`);
@@ -722,7 +678,7 @@ export async function updateOrderStatus(
     })
     .where(eq(orders.id, orderId));
 
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/orders/${orderId}/confirmation`);
@@ -802,7 +758,7 @@ export async function linkOrderManualCampaign(
       });
     }
 
-    revalidatePath("/campaigns");
+    revalidatePath("/campaigns", "layout");
     revalidatePath("/orders");
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(`/orders/${orderId}/confirmation`);
@@ -845,7 +801,7 @@ export async function linkOrderManualCampaign(
     });
   }
 
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/orders/${orderId}/confirmation`);
@@ -880,7 +836,7 @@ export async function deleteOrder(raw: unknown): Promise<DeleteOrderResult> {
 
   await db.delete(orders).where(eq(orders.id, row.id));
 
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   revalidatePath(`/orders/${orderId}/confirmation`);
@@ -957,7 +913,7 @@ export async function updateOrderMetadata(
     })
     .where(eq(orders.id, orderRow.id));
 
-  revalidatePath("/campaigns");
+  revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderRow.id}`);
   revalidatePath(`/orders/${orderRow.id}/confirmation`);
@@ -1096,7 +1052,7 @@ export async function resendOrderPurchaseCapi(
       })
       .where(eq(orders.id, orderId));
 
-    revalidatePath("/campaigns");
+    revalidatePath("/campaigns", "layout");
     revalidatePath("/orders");
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(`/orders/${orderId}/confirmation`);

@@ -4,16 +4,18 @@
  */
 
 import {
+  buildBusinessMessagingUserData,
+  buildStandardCapiUserData,
+  normalizeMetaEnvId,
+  resolveMetaPurchaseCapiPath,
+} from "@/lib/meta-capi-shared";
+import {
   hashCountryForMeta,
   hashExternalIdForMeta,
   hashPhoneForMeta,
 } from "@/lib/phone";
 
 const GRAPH_API_VERSION = "v25.0";
-
-function normalizeMetaEnvId(raw: string | undefined): string {
-  return (raw ?? "").trim().replace(/^=+/, "");
-}
 
 function isProductionNodeEnv(): boolean {
   return process.env.NODE_ENV === "production";
@@ -51,34 +53,45 @@ export function buildMetaFunnelPayload(
   const testEventCode = readTestEventCodeForPayload();
   const graphEventName = testEventCode ? "TestEvent" : params.eventName;
   const eventTime = Math.floor(params.eventTime.getTime() / 1000);
-  const wabaId = resolveWabaId(params.whatsappBusinessAccountId);
   const clid = params.ctwaClid?.trim() || null;
+  const capiPath = resolveMetaPurchaseCapiPath(clid);
 
   const phHash = hashPhoneForMeta(params.phoneDigits);
   const externalIdHash = hashExternalIdForMeta(params.contactId);
-  const userData: Record<string, unknown> = {
-    ph: [phHash],
-    external_id: [externalIdHash],
-  };
   const countryHash = params.countryCode
     ? hashCountryForMeta(params.countryCode)
     : null;
-  if (countryHash) userData.country = [countryHash];
-  if (clid) userData.ctwa_clid = clid;
-  if (wabaId) userData.whatsapp_business_account_id = wabaId;
+
+  const userData =
+    capiPath === "ctwa_whatsapp"
+      ? buildBusinessMessagingUserData({
+          phHash,
+          externalIdHash,
+          countryHash,
+          ctwaClid: clid,
+          wabaId: resolveWabaId(params.whatsappBusinessAccountId) || null,
+        })
+      : buildStandardCapiUserData({
+          phHash,
+          externalIdHash,
+          countryHash,
+        });
+
+  const event: Record<string, unknown> = {
+    event_name: graphEventName,
+    event_time: eventTime,
+    event_id: params.eventId,
+    action_source:
+      capiPath === "ctwa_whatsapp" ? "business_messaging" : "other",
+    user_data: userData,
+    custom_data: params.customData,
+  };
+  if (capiPath === "ctwa_whatsapp") {
+    event.messaging_channel = "whatsapp";
+  }
 
   const payload: Record<string, unknown> = {
-    data: [
-      {
-        event_name: graphEventName,
-        event_time: eventTime,
-        event_id: params.eventId,
-        action_source: "business_messaging",
-        messaging_channel: "whatsapp",
-        user_data: userData,
-        custom_data: params.customData,
-      },
-    ],
+    data: [event],
   };
 
   if (testEventCode) {

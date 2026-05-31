@@ -31,7 +31,8 @@ export default async function NewOrderPage({
           Create order
         </h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Select the CTWA session that matches the customer, then send Purchase to Meta.
+          Meta Purchase is sent when status is Confirmed, Shipped, or Paid—even without a
+          CTWA session (hashed phone and WABA; optional campaign link for reporting only).
         </p>
       </div>
       {products.length === 0 ? (

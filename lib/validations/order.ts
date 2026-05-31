@@ -80,7 +80,8 @@ const createOrderObjectSchema = z.object({
   capiEventTimeKabul: capiEventTimeKabulField,
   deliveryCost: orderDeliveryCostField,
   /**
-   * When there is no CTWA session on the phone: synced Meta campaign for P&amp;L.
+   * Optional: attribute to a synced Meta campaign for in-app P&amp;L when there is no CTWA session.
+   * Does not gate Meta Purchase CAPI (sent with phone / WABA even without `ctwa_clid`).
    */
   manualMetaCampaignId: manualMetaCampaignIdField,
   /** Inter-provincial shipment within Afghanistan — requires province. */
@@ -127,28 +128,9 @@ export const createOrderSchema = createOrderObjectSchema.superRefine(
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
-/** Builds client resolver; when CTWA-less and campaigns exist, manual campaign becomes required on the server too. */
-export function buildNewOrderFormSchema(requireManualCampaign: boolean) {
-  return createOrderObjectSchema
-    .omit({ orderId: true })
-    .superRefine((data, ctx) => {
-      refineInterProvinceAfghanistanDelivery(data, ctx);
-      if (
-        requireManualCampaign &&
-        !data.manualMetaCampaignId?.trim()
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "Select a Meta campaign. This contact has no WhatsApp CTWA session.",
-          path: ["manualMetaCampaignId"],
-        });
-      }
-    });
-}
-
-/** Soft client schema (campaign optional at parse time unless wrapped by `buildNewOrderFormSchema(true)`). */
-export const newOrderFormSchema = buildNewOrderFormSchema(false);
+export const newOrderFormSchema = createOrderObjectSchema
+  .omit({ orderId: true })
+  .superRefine(refineInterProvinceAfghanistanDelivery);
 
 export type NewOrderFormInput = z.infer<typeof newOrderFormSchema>;
 

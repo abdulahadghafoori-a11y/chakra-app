@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   lte,
+  notInArray,
   sql,
 } from "drizzle-orm";
 
@@ -22,6 +23,7 @@ import {
 } from "@/drizzle/schema";
 import { META_MARKETING_API_ACTIVITY_EMAIL } from "@/lib/campaign-activity";
 import {
+  CAMPAIGN_EXCLUDED_ORDER_STATUSES,
   sqlCampaignConvertedOrdersCount,
   sqlCampaignConvertedRevenueSum,
   sqlCampaignTotalOrdersCount,
@@ -736,6 +738,7 @@ export async function listAttributedOrdersForCampaign(
         eq(metaAds.metaCampaignId, metaCampaignId),
         gte(orders.orderEventAt, since),
         lte(orders.orderEventAt, until),
+        notInArray(orders.status, [...CAMPAIGN_EXCLUDED_ORDER_STATUSES]),
       ),
     );
 
@@ -754,6 +757,7 @@ export async function listAttributedOrdersForCampaign(
         eq(orders.manualMetaCampaignId, metaCampaignId),
         gte(orders.orderEventAt, since),
         lte(orders.orderEventAt, until),
+        notInArray(orders.status, [...CAMPAIGN_EXCLUDED_ORDER_STATUSES]),
       ),
     );
 

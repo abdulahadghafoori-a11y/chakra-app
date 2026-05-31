@@ -28,11 +28,13 @@ import {
 } from "@/lib/campaign-verdict";
 import {
   CAMPAIGN_CONVERTED_ORDER_STATUSES,
+  sqlCampaignCapiSentCount,
   sqlCampaignConvertedDeliverySum,
   sqlCampaignConvertedOrdersCount,
   sqlCampaignConvertedRevenueSum,
   sqlCampaignTotalDistinctOrdersCount,
   sqlCampaignTotalOrdersCount,
+  sqlCampaignTotalRevenueSum,
 } from "@/lib/campaign-order-counts";
 
 function num(s: string | null | undefined): number {
@@ -58,7 +60,7 @@ export async function rollupRevenueByCampaign(
     .select({
       metaCampaignId: metaAds.metaCampaignId,
       campaignName: metaCampaigns.name,
-      revenue: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      revenue: sqlCampaignTotalRevenueSum,
       ordersCount: sqlCampaignTotalOrdersCount,
     })
     .from(orders)
@@ -72,7 +74,7 @@ export async function rollupRevenueByCampaign(
     .select({
       metaCampaignId: metaCampaigns.id,
       campaignName: metaCampaigns.name,
-      revenue: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      revenue: sqlCampaignTotalRevenueSum,
       ordersCount: sqlCampaignTotalOrdersCount,
     })
     .from(orders)
@@ -248,14 +250,12 @@ export async function rollupAttributedOrdersAggByAdForCampaign(
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'cancelled')::int`,
       returnedOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'returned')::int`,
-      totalRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      totalRevenue: sqlCampaignTotalRevenueSum,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedOrdersCount: sqlCampaignConvertedOrdersCount,
       convertedRevenue: sqlCampaignConvertedRevenueSum,
-      capiSentCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
+      capiSentCount: sqlCampaignCapiSentCount,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -311,7 +311,7 @@ export async function rollupLineCogsByAdForCampaign(
     .select({
       metaAdId: metaAds.id,
       totalLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} not in ('cancelled', 'returned')), 0)::text`,
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
@@ -545,14 +545,12 @@ export async function rollupAttributedOrdersAggByCampaign(
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'cancelled')::int`,
       returnedOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'returned')::int`,
-      totalRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      totalRevenue: sqlCampaignTotalRevenueSum,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedOrdersCount: sqlCampaignConvertedOrdersCount,
       convertedRevenue: sqlCampaignConvertedRevenueSum,
-      capiSentCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
+      capiSentCount: sqlCampaignCapiSentCount,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
@@ -578,14 +576,12 @@ export async function rollupAttributedOrdersAggByCampaign(
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'cancelled')::int`,
       returnedOrdersCount:
         sql<number>`count(${orders.id}) filter (where ${orders.status} = 'returned')::int`,
-      totalRevenue:
-        sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      totalRevenue: sqlCampaignTotalRevenueSum,
       paidRevenue:
         sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedOrdersCount: sqlCampaignConvertedOrdersCount,
       convertedRevenue: sqlCampaignConvertedRevenueSum,
-      capiSentCount:
-        sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true)::int`,
+      capiSentCount: sqlCampaignCapiSentCount,
     })
     .from(orders)
     .innerJoin(
@@ -666,7 +662,7 @@ export async function rollupLineCogsByCampaign(
     .select({
       metaCampaignId: metaAds.metaCampaignId,
       totalLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} not in ('cancelled', 'returned')), 0)::text`,
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
@@ -683,7 +679,7 @@ export async function rollupLineCogsByCampaign(
     .select({
       metaCampaignId: metaCampaigns.id,
       totalLineCogs:
-        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric), 0)::text`,
+        sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} not in ('cancelled', 'returned')), 0)::text`,
       paidLineCogs:
         sql<string>`coalesce(sum(${orderItems.lineCogs}::numeric) filter (where ${orders.status} = 'paid'), 0)::text`,
       convertedLineCogs:
@@ -1493,7 +1489,7 @@ export async function getUnattributedOrderTotals(
   const [row] = await db
     .select({
       c: sqlCampaignTotalOrdersCount,
-      rev: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      rev: sqlCampaignTotalRevenueSum,
     })
     .from(orders)
     .where(
@@ -1518,7 +1514,7 @@ export async function getUnlinkedCtwaOrderTotals(
   const [row] = await db
     .select({
       c: sqlCampaignTotalOrdersCount,
-      rev: sql<string>`coalesce(sum(${orders.value}::numeric), 0)::text`,
+      rev: sqlCampaignTotalRevenueSum,
     })
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))

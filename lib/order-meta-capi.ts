@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import {
   contacts,
@@ -24,6 +24,78 @@ export type OrderPurchaseCapiContext = {
   orderTotal: number;
   totalQuantity: number;
 };
+
+export type ContactCtwaCapiFields = {
+  /** Session row to store on `orders.ctwa_session_id` when creating an order. */
+  ctwaSessionId: string | null;
+  ctwaClid: string | null;
+  wabaId: string | null;
+};
+
+/**
+ * CTWA fields for Purchase CAPI and order storage.
+ * Prefers `preferredSessionId` when it belongs to the contact; falls back to latest session
+ * for click id / WABA when the chosen row has no `ctwa_clid`.
+ */
+export async function resolveContactCtwaForCapi(
+  contactId: string,
+  preferredSessionId?: string | null,
+): Promise<ContactCtwaCapiFields> {
+  const [latest] = await db
+    .select({
+      id: ctwaSessions.id,
+      ctwaClid: ctwaSessions.ctwaClid,
+      wabaId: ctwaSessions.wabaId,
+    })
+    .from(ctwaSessions)
+    .where(eq(ctwaSessions.contactId, contactId))
+    .orderBy(desc(ctwaSessions.sendTime))
+    .limit(1);
+
+  const preferred = preferredSessionId?.trim();
+  if (!preferred) {
+    return {
+      ctwaSessionId: latest?.id ?? null,
+      ctwaClid: latest?.ctwaClid?.trim() || null,
+      wabaId: latest?.wabaId ?? null,
+    };
+  }
+
+  const [chosen] = await db
+    .select({
+      id: ctwaSessions.id,
+      ctwaClid: ctwaSessions.ctwaClid,
+      wabaId: ctwaSessions.wabaId,
+    })
+    .from(ctwaSessions)
+    .where(
+      and(eq(ctwaSessions.id, preferred), eq(ctwaSessions.contactId, contactId)),
+    )
+    .limit(1);
+
+  if (!chosen) {
+    return {
+      ctwaSessionId: latest?.id ?? null,
+      ctwaClid: latest?.ctwaClid?.trim() || null,
+      wabaId: latest?.wabaId ?? null,
+    };
+  }
+
+  let ctwaClid = chosen.ctwaClid?.trim() || null;
+  let wabaId = chosen.wabaId ?? null;
+  if (!ctwaClid && latest?.ctwaClid?.trim()) {
+    ctwaClid = latest.ctwaClid.trim();
+  }
+  if (!wabaId && latest?.wabaId) {
+    wabaId = latest.wabaId;
+  }
+
+  return {
+    ctwaSessionId: chosen.id,
+    ctwaClid,
+    wabaId,
+  };
+}
 
 /**
  * Load contact, CTWA session (order-linked or latest for contact), and lines for Purchase CAPI.
@@ -56,40 +128,10 @@ export async function loadOrderPurchaseCapiContext(
 
   if (!contact) return null;
 
-  let session: {
-    ctwaClid: string | null;
-    wabaId: string | null;
-  } | null = null;
-
-  if (orderRow.ctwaSessionId) {
-    const [linked] = await db
-      .select({
-        ctwaClid: ctwaSessions.ctwaClid,
-        wabaId: ctwaSessions.wabaId,
-      })
-      .from(ctwaSessions)
-      .where(eq(ctwaSessions.id, orderRow.ctwaSessionId))
-      .limit(1);
-    session = linked ?? null;
-  }
-
-  if (!session?.ctwaClid?.trim()) {
-    const [latest] = await db
-      .select({
-        ctwaClid: ctwaSessions.ctwaClid,
-        wabaId: ctwaSessions.wabaId,
-      })
-      .from(ctwaSessions)
-      .where(eq(ctwaSessions.contactId, orderRow.contactId))
-      .orderBy(desc(ctwaSessions.sendTime))
-      .limit(1);
-    if (latest?.ctwaClid?.trim()) {
-      session = latest;
-    }
-  }
-
-  const ctwaClid = session?.ctwaClid?.trim() || null;
-  const wabaId = session?.wabaId ?? null;
+  const { ctwaClid, wabaId } = await resolveContactCtwaForCapi(
+    orderRow.contactId,
+    orderRow.ctwaSessionId,
+  );
 
   const itemRows = await db
     .select({

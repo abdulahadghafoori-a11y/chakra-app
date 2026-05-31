@@ -192,19 +192,6 @@ export function NewOrderForm({
     sessions.length === 0 &&
     phoneOk;
 
-  const metaCampaignChoicesAvailable = metaCampaignOptions.length > 0;
-  /** CTWA-less orders must attribute to a synced campaign whenever any exist */
-  const requireManualCampaignPick =
-    hasNoCtwaSession && metaCampaignChoicesAvailable;
-  const cannotCreateWithoutSyncedCampaigns =
-    hasNoCtwaSession && !metaCampaignChoicesAvailable;
-
-  useEffect(() => {
-    if (!requireManualCampaignPick) {
-      form.clearErrors("manualMetaCampaignId");
-    }
-  }, [requireManualCampaignPick, form]);
-
   const orderTotalAfn = useMemo(() => {
     return (watchedLines ?? []).reduce((sum, line) => {
       const u = Number(line?.unitSalePrice);
@@ -310,7 +297,6 @@ export function NewOrderForm({
     loadingPhoneData ||
     !phoneOk ||
     contactPhase.status !== "found" ||
-    cannotCreateWithoutSyncedCampaigns ||
     !fxRateValid;
 
   function runCreateOrder(values: FormValues) {
@@ -347,13 +333,9 @@ export function NewOrderForm({
           try {
             const meta = JSON.parse(res.capiPayloadJson) as {
               capiDeferred?: boolean;
-              /** Legacy: older builds skipped CAPI without ctwa_clid */
-              capiSkipped?: boolean;
             };
             if (meta.capiDeferred) {
-              summary = `Order ${res.orderId} saved. Meta Purchase will be sent when status is Confirmed or Paid (or update status on the order page).`;
-            } else if (meta.capiSkipped) {
-              summary = `Order ${res.orderId} saved (legacy: Meta Purchase was skipped — no CTWA session).`;
+              summary = `Order ${res.orderId} saved. Meta Purchase will be sent when status is Confirmed, Shipped, or Paid.`;
             }
           } catch {
             summary = `Order ${res.orderId} saved.`;
@@ -384,19 +366,6 @@ export function NewOrderForm({
       );
       return;
     }
-
-    if (requireManualCampaignPick && !values.manualMetaCampaignId.trim()) {
-      toast.error(
-        "Select a Meta campaign. This contact has no WhatsApp CTWA session yet.",
-      );
-      form.setError("manualMetaCampaignId", {
-        type: "manual",
-        message:
-          "Select a Meta campaign. This contact has no WhatsApp CTWA session.",
-      });
-      return;
-    }
-    form.clearErrors("manualMetaCampaignId");
 
     setReviewLoading(true);
     const preview = await previewOrderCapiPayload({ ...values });
@@ -568,24 +537,25 @@ export function NewOrderForm({
               {hasNoCtwaSession ? (
                 <div className="bg-muted/20 space-y-3 rounded-lg border border-dashed p-3">
                   <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                    Meta campaign (required · no CTWA session)
+                    Meta campaign (optional · no CTWA session)
                   </p>
                   <p className="text-muted-foreground text-xs leading-relaxed">
                     This contact has <strong className="text-foreground font-medium">no</strong>{" "}
-                    WhatsApp CTWA session. You must attribute this order by choosing a synced
-                    Meta campaign so reporting under{" "}
-                    <strong className="text-foreground font-medium">Campaigns</strong> stays accurate.
+                    WhatsApp CTWA session. Meta Purchase still sends (hashed phone + WABA, no{" "}
+                    <code className="text-[11px]">ctwa_clid</code>). Optionally link a synced
+                    campaign so revenue appears under{" "}
+                    <strong className="text-foreground font-medium">Campaigns</strong>.
                   </p>
                   {metaCampaignOptions.length === 0 ? (
                     <p className="text-muted-foreground text-xs">
-                      No campaigns in the database. Open{" "}
+                      No campaigns synced yet.{" "}
                       <Link
                         className="text-foreground underline underline-offset-2"
                         href="/campaigns"
                       >
                         Campaigns
                       </Link>{" "}
-                      and run <strong>Sync from Meta</strong> first.
+                      → Sync from Meta — or create the order without campaign attribution.
                     </p>
                   ) : (
                     <FormField
@@ -594,12 +564,10 @@ export function NewOrderForm({
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel className="text-xs">
-                            Meta campaign{" "}
-                            <span className="text-destructive">*</span>
+                            Meta campaign (reporting)
                           </FormLabel>
                           <FormControl>
                             <MetaCampaignCombobox
-                              required
                               options={metaCampaignOptions}
                               value={field.value}
                               onChange={field.onChange}

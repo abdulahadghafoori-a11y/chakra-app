@@ -1,15 +1,22 @@
 /**
  * Meta Conversions API (Graph) — server-side Purchase for WhatsApp / business_messaging.
  *
- * When `ctwa_clid` is set, Meta can tie the event to CTWA attribution; without it we still send
- * `Purchase`/`TestEvent` with hashed phone, external_id, and optional `whatsapp_business_account_id`
- * (session or `META_WHATSAPP_BUSINESS_ACCOUNT_ID`) — weaker campaign matching, fewer “missing Meta purchase” gaps.
+ * With `ctwa_clid`: `business_messaging` + `whatsapp` + page_id + WABA (CTWA attribution).
+ * Without `ctwa_clid`: `action_source` `other` + hashed phone / external_id (Meta rejects
+ * business_messaging WhatsApp events missing `ctwa_clid`).
  *
  * Docs: https://developers.facebook.com/docs/marketing-api/conversions-api
  */
 
 import { randomBytes } from "crypto";
 
+import {
+  buildBusinessMessagingUserData,
+  buildStandardCapiUserData,
+  normalizeMetaEnvId,
+  resolveMetaPurchaseCapiPath,
+  type MetaPurchaseCapiPath,
+} from "@/lib/meta-capi-shared";
 import {
   hashCountryForMeta,
   hashExternalIdForMeta,
@@ -59,12 +66,9 @@ export type MetaPurchaseResult = {
   eventId: string;
   /** Pretty JSON of the POST body (for UI / sessionStorage). */
   payloadJson: string;
+  /** Which Graph shape was used (CTWA vs no click id). */
+  capiPath: MetaPurchaseCapiPath;
 };
-
-/** Dotenv `KEY==value` yields a leading `=`; strip so Graph ids stay valid. */
-function normalizeMetaEnvId(raw: string | undefined): string {
-  return (raw ?? "").trim().replace(/^=+/, "");
-}
 
 function isProductionNodeEnv(): boolean {
   return process.env.NODE_ENV === "production";
@@ -112,33 +116,39 @@ function resolveWabaId(params: MetaPurchaseParams): string {
 export function buildMetaPurchasePayload(
   params: MetaPurchaseParams,
   options?: { eventIdOverride?: string },
-): { payload: Record<string, unknown>; eventId: string } {
+): {
+  payload: Record<string, unknown>;
+  eventId: string;
+  capiPath: MetaPurchaseCapiPath;
+} {
   const testEventCode = readTestEventCodeForPayload();
   const eventName = testEventCode ? "TestEvent" : "Purchase";
   const eventTime = Math.floor(params.orderCreatedAt.getTime() / 1000);
   const eventId =
     options?.eventIdOverride?.trim() || metaPurchaseEventId(params.orderId);
-  const wabaId = resolveWabaId(params);
   const clid = params.ctwaClid?.trim() || null;
+  const capiPath = resolveMetaPurchaseCapiPath(clid);
 
   const phHash = hashPhoneForMeta(params.phoneDigits);
   const externalIdHash = hashExternalIdForMeta(params.contactId);
-  const userData: Record<string, unknown> = {
-    ph: [phHash],
-    external_id: [externalIdHash],
-  };
   const countryHash = params.countryCode
     ? hashCountryForMeta(params.countryCode)
     : null;
-  if (countryHash) {
-    userData.country = [countryHash];
-  }
-  if (clid) {
-    userData.ctwa_clid = clid;
-  }
-  if (wabaId) {
-    userData.whatsapp_business_account_id = wabaId;
-  }
+
+  const userData =
+    capiPath === "ctwa_whatsapp"
+      ? buildBusinessMessagingUserData({
+          phHash,
+          externalIdHash,
+          countryHash,
+          ctwaClid: clid,
+          wabaId: resolveWabaId(params) || null,
+        })
+      : buildStandardCapiUserData({
+          phHash,
+          externalIdHash,
+          countryHash,
+        });
 
   const contents = params.lines.map((line) => {
     const unitPrice =
@@ -170,25 +180,28 @@ export function buildMetaPurchasePayload(
     customData.content_name = contentName;
   }
 
+  const event: Record<string, unknown> = {
+    event_name: eventName,
+    event_time: eventTime,
+    event_id: eventId,
+    action_source:
+      capiPath === "ctwa_whatsapp" ? "business_messaging" : "other",
+    user_data: userData,
+    custom_data: customData,
+  };
+  if (capiPath === "ctwa_whatsapp") {
+    event.messaging_channel = "whatsapp";
+  }
+
   const payload: Record<string, unknown> = {
-    data: [
-      {
-        event_name: eventName,
-        event_time: eventTime,
-        event_id: eventId,
-        action_source: "business_messaging",
-        messaging_channel: "whatsapp",
-        user_data: userData,
-        custom_data: customData,
-      },
-    ],
+    data: [event],
   };
 
   if (testEventCode) {
     payload.test_event_code = testEventCode;
   }
 
-  return { payload, eventId };
+  return { payload, eventId, capiPath };
 }
 
 export function serializeMetaPayload(payload: Record<string, unknown>): string {
@@ -224,7 +237,7 @@ export async function sendMetaPurchaseEvent(
     }
   }
 
-  const { payload, eventId } = buildMetaPurchasePayload(params, {
+  const { payload, eventId, capiPath } = buildMetaPurchasePayload(params, {
     eventIdOverride: options?.eventIdOverride,
   });
   const payloadJson = serializeMetaPayload(payload);
@@ -280,5 +293,5 @@ export async function sendMetaPurchaseEvent(
     );
   }
 
-  return { eventId, payloadJson };
+  return { eventId, payloadJson, capiPath };
 }

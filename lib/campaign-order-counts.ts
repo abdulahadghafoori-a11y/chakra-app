@@ -1,14 +1,48 @@
 import { sql } from "drizzle-orm";
 
 import { orders } from "@/drizzle/schema";
+import { orderStatuses } from "@/lib/validations/order";
+
+/** Statuses that must not appear in campaign order counts, revenue, or CAPI coverage. */
+export const CAMPAIGN_EXCLUDED_ORDER_STATUSES = [
+  "cancelled",
+  "returned",
+] as const;
+
+export type CampaignExcludedOrderStatus =
+  (typeof CAMPAIGN_EXCLUDED_ORDER_STATUSES)[number];
+
+const excludedList = CAMPAIGN_EXCLUDED_ORDER_STATUSES.map((s) => `'${s}'`).join(
+  ", ",
+);
+
+/** Drizzle `notInArray(orders.status, …)` for list queries. */
+export const CAMPAIGN_COUNTABLE_ORDER_STATUSES = orderStatuses.filter(
+  (s) =>
+    !CAMPAIGN_EXCLUDED_ORDER_STATUSES.includes(
+      s as CampaignExcludedOrderStatus,
+    ),
+);
+
+export function isCampaignCountableOrderStatus(status: string): boolean {
+  return !CAMPAIGN_EXCLUDED_ORDER_STATUSES.includes(
+    status as CampaignExcludedOrderStatus,
+  );
+}
 
 /**
  * Campaign “total orders” = pending, confirmed, shipped, and paid.
  * Excludes cancelled and returned only.
  */
-export const sqlCampaignTotalOrdersCount = sql<number>`count(${orders.id}) filter (where ${orders.status} not in ('cancelled', 'returned'))::int`;
+export const sqlCampaignTotalOrdersCount = sql<number>`count(${orders.id}) filter (where ${orders.status} not in (${sql.raw(excludedList)}))::int`;
 
-export const sqlCampaignTotalDistinctOrdersCount = sql<number>`count(distinct ${orders.id}) filter (where ${orders.status} not in ('cancelled', 'returned'))::int`;
+export const sqlCampaignTotalDistinctOrdersCount = sql<number>`count(distinct ${orders.id}) filter (where ${orders.status} not in (${sql.raw(excludedList)}))::int`;
+
+/** Merchandise total for attributed-order rollups (matches {@link sqlCampaignTotalOrdersCount}). */
+export const sqlCampaignTotalRevenueSum = sql<string>`coalesce(sum(${orders.value}::numeric) filter (where ${orders.status} not in (${sql.raw(excludedList)})), 0)::text`;
+
+/** CAPI coverage numerator — only orders that still count as attributed. */
+export const sqlCampaignCapiSentCount = sql<number>`count(${orders.id}) filter (where ${orders.capiSent} = true and ${orders.status} not in (${sql.raw(excludedList)}))::int`;
 
 /**
  * Campaign “converted” / fulfilled for counts and P&amp;L (COD store).
