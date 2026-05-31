@@ -7,24 +7,6 @@ export function normalizeMetaEnvId(raw: string | undefined): string {
   return (raw ?? "").trim().replace(/^=+/, "");
 }
 
-/** Facebook Page id linked to WhatsApp / CTWA (plain value in CAPI `user_data.page_id`). */
-export function resolveMetaFacebookPageId(): string {
-  return (
-    normalizeMetaEnvId(process.env.META_FACEBOOK_PAGE_ID) ||
-    normalizeMetaEnvId(process.env.META_PAGE_ID)
-  );
-}
-
-export function requireMetaFacebookPageIdForBusinessMessaging(): string {
-  const pageId = resolveMetaFacebookPageId();
-  if (!pageId) {
-    throw new Error(
-      "META_FACEBOOK_PAGE_ID is required for WhatsApp business_messaging CAPI. Use the Facebook Page id linked to your WhatsApp Business Account (Business settings → Accounts → Pages, or Page Settings → About).",
-    );
-  }
-  return pageId;
-}
-
 export type BusinessMessagingUserDataInput = {
   phHash: string;
   externalIdHash: string;
@@ -44,11 +26,9 @@ export function buildBusinessMessagingUserData(
     );
   }
 
-  const pageId = requireMetaFacebookPageIdForBusinessMessaging();
   const userData: Record<string, unknown> = {
     ph: [input.phHash],
     external_id: [input.externalIdHash],
-    page_id: pageId,
     ctwa_clid: clid,
   };
   if (input.countryHash) {

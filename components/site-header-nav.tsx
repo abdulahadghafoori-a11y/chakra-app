@@ -1,6 +1,6 @@
 "use client";
 
-import { MenuIcon, XIcon } from "lucide-react";
+import { MenuIcon, PlusIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -13,9 +13,12 @@ import {
   DialogClose,
   DialogContent,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+
+const NEW_ORDER_PATH = "/orders/new";
 
 const baseAuthedNavLinks: { href: string; label: string }[] = [
   { href: "/", label: "Dashboard" },
@@ -63,19 +66,22 @@ function MobileNavDrawer({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-lg"
-        className="shrink-0 sm:hidden"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-controls={titleId}
-        aria-label={open ? "Close navigation menu" : "Open navigation menu"}
-        onClick={() => setOpen((v) => !v)}
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-lg"
+            className="shrink-0 sm:hidden"
+            aria-expanded={open}
+            aria-haspopup="dialog"
+            aria-controls={titleId}
+            aria-label="Open navigation menu"
+          />
+        }
       >
         <MenuIcon className="size-5" aria-hidden />
-      </Button>
+      </DialogTrigger>
       <DialogContent
         showCloseButton={false}
         id={titleId}
@@ -142,13 +148,21 @@ export function SiteHeaderNav({
             Log in
           </Link>
           <Link
-            href="/orders/new"
-            className={cn(buttonVariants({ size: "sm" }))}
+            href={NEW_ORDER_PATH}
+            className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}
           >
+            <PlusIcon className="size-4" aria-hidden />
             New order
           </Link>
         </nav>
         <div className="flex flex-1 items-center justify-end gap-2 sm:hidden">
+          <Link
+            href={NEW_ORDER_PATH}
+            className={cn(buttonVariants({ size: "sm" }), "gap-1.5 shrink-0")}
+          >
+            <PlusIcon className="size-4" aria-hidden />
+            New order
+          </Link>
           <ThemeToggle />
           <MobileNavDrawer titleId={drawerTitleId}>
             <Link
@@ -156,12 +170,6 @@ export function SiteHeaderNav({
               className={navDrawerLinkClass(pathname, "/login")}
             >
               Log in
-            </Link>
-            <Link
-              href="/orders/new"
-              className={navDrawerLinkClass(pathname, "/orders/new")}
-            >
-              New order
             </Link>
           </MobileNavDrawer>
         </div>
@@ -187,10 +195,24 @@ export function SiteHeaderNav({
         ))}
       </nav>
       <div className="hidden shrink-0 items-center gap-2 sm:flex">
+        <Link
+          href={NEW_ORDER_PATH}
+          className={cn(buttonVariants({ size: "sm" }), "gap-1.5")}
+        >
+          <PlusIcon className="size-4" aria-hidden />
+          New order
+        </Link>
         <ThemeToggle />
         <SalesSignOutButton />
       </div>
       <div className="flex flex-1 items-center justify-end gap-2 sm:hidden">
+        <Link
+          href={NEW_ORDER_PATH}
+          className={cn(buttonVariants({ size: "sm" }), "gap-1.5 shrink-0")}
+        >
+          <PlusIcon className="size-4" aria-hidden />
+          New order
+        </Link>
         <ThemeToggle />
         <MobileNavDrawer titleId={drawerTitleId}>
           {authedNavLinks.map((l) => (

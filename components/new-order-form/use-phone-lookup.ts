@@ -5,12 +5,19 @@ import { toast } from "sonner";
 import type { UseFormReturn } from "react-hook-form";
 
 import { getContactByPhone } from "@/actions/contact";
+import {
+  getRecentOrdersByPhoneForNewOrder,
+  type NewOrderContactOrderRow,
+} from "@/actions/order";
 import { getCtwaSessionsByPhone, type CtwaSessionRow } from "@/actions/ctwa";
 import type { ContactPhase, FormValues } from "@/components/new-order-form/shared";
 import { isValidE164Input } from "@/lib/phone-e164";
 
 export function usePhoneLookup(form: UseFormReturn<FormValues>) {
   const [sessions, setSessions] = useState<CtwaSessionRow[]>([]);
+  const [contactOrders, setContactOrders] = useState<NewOrderContactOrderRow[]>(
+    [],
+  );
   const [loadingPhoneData, setLoadingPhoneData] = useState(false);
   const [contactPhase, setContactPhase] = useState<ContactPhase>({
     status: "idle",
@@ -24,6 +31,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
       const trimmed = (phone ?? "").trim();
       if (!trimmed) {
         setSessions([]);
+        setContactOrders([]);
         form.setValue("ctwaSessionId", "");
         setContactPhase({ status: "idle" });
         multiSessionNotifyKeyRef.current = null;
@@ -31,6 +39,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
       }
       if (!isValidE164Input(trimmed)) {
         setSessions([]);
+        setContactOrders([]);
         form.setValue("ctwaSessionId", "");
         setContactPhase({ status: "idle" });
         multiSessionNotifyKeyRef.current = null;
@@ -42,13 +51,16 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
         getCtwaSessionsByPhone(trimmed),
         getContactByPhone(trimmed),
       ])
-        .then(([rows, contact]) => {
+        .then(async ([rows, contact]) => {
           setSessions(rows);
           form.setValue("ctwaSessionId", rows[0]?.id ?? "");
           if (contact) {
             setContactPhase({ status: "found", contact });
+            const prior = await getRecentOrdersByPhoneForNewOrder(trimmed);
+            setContactOrders(prior);
           } else {
             setContactPhase({ status: "not_found" });
+            setContactOrders([]);
           }
         })
         .finally(() => setLoadingPhoneData(false));
@@ -80,5 +92,5 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
     }
   }, [contactPhase, form]);
 
-  return { sessions, loadingPhoneData, contactPhase, phone };
+  return { sessions, contactOrders, loadingPhoneData, contactPhase, phone };
 }

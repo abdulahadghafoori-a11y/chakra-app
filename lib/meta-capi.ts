@@ -1,7 +1,7 @@
 /**
  * Meta Conversions API (Graph) — server-side Purchase for WhatsApp / business_messaging.
  *
- * With `ctwa_clid`: `business_messaging` + `whatsapp` + page_id + WABA (CTWA attribution).
+ * With `ctwa_clid`: `business_messaging` + `whatsapp` + `ctwa_clid` + WABA (CTWA attribution).
  * Without `ctwa_clid`: `action_source` `other` + hashed phone / external_id (Meta rejects
  * business_messaging WhatsApp events missing `ctwa_clid`).
  *

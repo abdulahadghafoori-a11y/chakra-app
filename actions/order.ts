@@ -39,6 +39,7 @@ import {
   resolveContactCtwaForCapi,
 } from "@/lib/order-meta-capi";
 import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
+import { loadRecentOrdersForContact } from "@/lib/orders-list";
 import { recordManualCampaignAttributionChange } from "@/lib/campaign-activity";
 import { enforcePublicActionRateLimit } from "@/lib/rate-limit";
 import { log } from "@/lib/structured-log";
@@ -67,6 +68,58 @@ export type CreateOrderSuccess = {
 };
 
 export type CreateOrderResult = CreateOrderSuccess | { ok: false; error: string };
+
+/** Serializable row for new-order contact cross-check. */
+export type NewOrderContactOrderRow = {
+  id: string;
+  status: string;
+  valueUsd: string;
+  valueAfn: string | null;
+  currency: string;
+  capiSent: boolean;
+  orderEventAtIso: string;
+  createdAtIso: string;
+  campaignName: string | null;
+  campaignVia: "ctwa" | "manual" | null;
+  ctwaSessionUnlinked: boolean;
+  lines: { productName: string; quantity: number }[];
+};
+
+export async function getRecentOrdersByPhoneForNewOrder(
+  rawPhone: string,
+): Promise<NewOrderContactOrderRow[]> {
+  const limited = await enforcePublicActionRateLimit("new_order_contact_orders", {
+    limit: 40,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) return [];
+
+  const phoneKey = contactPhoneKeyFromRaw(rawPhone);
+  if (!phoneKey) return [];
+
+  const [contact] = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.phoneNumber, phoneKey))
+    .limit(1);
+  if (!contact) return [];
+
+  const rows = await loadRecentOrdersForContact(contact.id);
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    valueUsd: r.value,
+    valueAfn: r.valueAfn,
+    currency: r.currency,
+    capiSent: r.capiSent,
+    orderEventAtIso: r.orderEventAt.toISOString(),
+    createdAtIso: r.createdAt.toISOString(),
+    campaignName: r.campaignName,
+    campaignVia: r.campaignVia,
+    ctwaSessionUnlinked: r.ctwaSessionUnlinked,
+    lines: r.lines,
+  }));
+}
 
 const PREVIEW_ORDER_ID = "PREVIEW";
 

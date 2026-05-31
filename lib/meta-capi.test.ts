@@ -24,7 +24,6 @@ const baseParams = {
 
 describe("buildMetaPurchasePayload", () => {
   it("uses business_messaging when ctwa_clid is set", () => {
-    process.env.META_FACEBOOK_PAGE_ID = "111";
     process.env.META_TEST_EVENT_CODE = "TEST12345";
 
     const { payload, capiPath } = buildMetaPurchasePayload({
@@ -38,7 +37,8 @@ describe("buildMetaPurchasePayload", () => {
     expect(event.messaging_channel).toBe("whatsapp");
     const userData = event.user_data as Record<string, unknown>;
     expect(userData.ctwa_clid).toBe("clid-abc");
-    expect(userData.page_id).toBe("111");
+    expect(userData.page_id).toBeUndefined();
+    expect(userData.whatsapp_business_account_id).toBe("waba123");
   });
 
   it("uses action_source other when ctwa_clid is missing", () => {

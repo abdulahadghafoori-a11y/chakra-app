@@ -8,6 +8,7 @@
  * `X-Chakra-Signature-256` when `CHAKRA_WEBHOOK_SECRET` is set (raw body HMAC, hex only).
  * If **both** are set, **either** valid signature accepts the request (Chakra pass-through often omits Meta’s header).
  * Contacts: upsert from every inbound `messages[]` customer row (with `from`).
+ * Metrics: each handled POST logs `whatsapp_webhook_handled` (JSON) with inbound 131060 vs CTWA vs contact upsert counts.
  * CTWA: insert `ctwa_sessions` only when `ctwa_clid` is present; eligible sessions link to `meta_ads`
  * via Marketing API hierarchy sync (`linkCtwaSessionToMetaAd` / `shouldLinkCtwaSessionToMetaAd`).
  * Sales agent: when `SALES_AGENT_ENABLED=true`, runs OpenAI + DB; WhatsApp send only if
@@ -33,7 +34,9 @@ import {
   coerceToMetaWhatsAppWebhookBody,
   extractMetaInboundContactJobs,
   extractMetaInboundMessageJobs,
+  extractMetaInboundMessageStats,
 } from "@/lib/meta-whatsapp-webhook";
+import { log } from "@/lib/structured-log";
 import { processInboundTextForSalesAgent } from "@/lib/sales-agent/process-inbound";
 import { linkCtwaSessionToMetaAd } from "@/lib/ctwa-meta-link";
 import { shouldLinkCtwaSessionToMetaAd } from "@/lib/feature-set";
@@ -123,6 +126,7 @@ export async function POST(request: Request) {
   }
 
   const contactJobs = extractMetaInboundContactJobs(body);
+  const inboundStats = extractMetaInboundMessageStats(body);
   let contactsUpserted = 0;
   let contactsErrors = 0;
 
@@ -151,17 +155,6 @@ export async function POST(request: Request) {
   }
 
   const jobs = extractMetaInboundMessageJobs(body);
-
-  const traceCounts =
-    process.env.META_WEBHOOK_TRACE?.trim().toLowerCase() === "true"
-      ? {
-          contactJobCount: contactJobs.length,
-          ctwaJobCount: jobs.length,
-        }
-      : null;
-  if (traceCounts) {
-    console.info("[whatsapp webhook] trace", traceCounts);
-  }
 
   let ctwaProcessed = 0;
   let ctwaErrors = 0;
@@ -264,11 +257,36 @@ export async function POST(request: Request) {
     }
   }
 
+  const metrics = {
+    inbound: inboundStats,
+    contacts: {
+      jobCount: contactJobs.length,
+      upserted: contactsUpserted,
+      errors: contactsErrors,
+    },
+    ctwa: {
+      jobCount: jobs.length,
+      processed: ctwaProcessed,
+      errors: ctwaErrors,
+      inserted: ctwaInsertedNew,
+      duplicateKey: ctwaDuplicateKey,
+    },
+    agent: {
+      textCount: textMsgs.length,
+      ok: agentOk,
+      skipped: agentSkipped,
+      errors: agentErrors,
+    },
+  };
+
+  log.info("whatsapp_webhook_handled", metrics);
+
   if (contactJobs.length === 0 && jobs.length === 0 && textMsgs.length === 0) {
     return NextResponse.json({
       ok: true,
       ignored: true,
       reason: "no_messages",
+      metrics,
     });
   }
 
@@ -286,6 +304,6 @@ export async function POST(request: Request) {
       duplicateKey: ctwaDuplicateKey,
     },
     agent: { ok: agentOk, skipped: agentSkipped, errors: agentErrors },
-    ...(traceCounts ? { trace: traceCounts } : {}),
+    metrics,
   });
 }

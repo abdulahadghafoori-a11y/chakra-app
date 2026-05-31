@@ -60,6 +60,7 @@ import {
   formatDateTimeKabul,
   getDefaultKabulDateTimeLocal,
 } from "@/lib/kabul-time";
+import { ContactExistingOrders } from "@/components/new-order-form/contact-existing-orders";
 import {
   CtwaSessionAttributionFooter,
   defaultLine,
@@ -135,7 +136,7 @@ export function NewOrderForm({
   });
 
   const { setValue, control } = form;
-  const { sessions, loadingPhoneData, contactPhase, phone } =
+  const { sessions, contactOrders, loadingPhoneData, contactPhase, phone } =
     usePhoneLookup(form);
   const { fields, append, remove } = useFieldArray({
     control,
@@ -630,6 +631,15 @@ export function NewOrderForm({
                       </dd>
                     </div>
                   </dl>
+                </div>
+              ) : null}
+              {contactPhase.status === "found" ? (
+                <div className="bg-muted/30 rounded-lg border p-3">
+                  <ContactExistingOrders
+                    orders={contactOrders}
+                    loading={loadingPhoneData}
+                    contactId={contactPhase.contact.id}
+                  />
                 </div>
               ) : null}
             </div>

@@ -1,6 +1,14 @@
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 
-import { contacts, orderItems, orders, products } from "@/drizzle/schema";
+import {
+  contacts,
+  ctwaSessions,
+  metaAds,
+  metaCampaigns,
+  orderItems,
+  orders,
+  products,
+} from "@/drizzle/schema";
 import { formatDateTimeKabul } from "@/lib/kabul-time";
 import {
   estimateAfnWholeFromStoredUsd,
@@ -158,6 +166,144 @@ function mapOrderTableRow(r: {
 /**
  * Orders for a list table (phone, CAPI, totals) with optional contact filter.
  */
+/** Recent orders for one contact (new-order cross-check). */
+export type ContactOrderLineSummary = {
+  productName: string;
+  quantity: number;
+};
+
+export type ContactOrderSummaryRow = {
+  id: string;
+  status: string;
+  value: string;
+  valueAfn: string | null;
+  currency: string;
+  capiSent: boolean;
+  orderEventAt: Date;
+  createdAt: Date;
+  /** Synced Meta campaign name (CTWA ad path or manual attribution). */
+  campaignName: string | null;
+  campaignVia: "ctwa" | "manual" | null;
+  /** Order has a CTWA session row but no synced campaign on the ad. */
+  ctwaSessionUnlinked: boolean;
+  lines: ContactOrderLineSummary[];
+};
+
+export function formatContactOrderProductsSummary(
+  lines: ContactOrderLineSummary[],
+): string {
+  if (lines.length === 0) return "—";
+  return lines
+    .map((l) => `${l.productName} ×${l.quantity}`)
+    .join(", ");
+}
+
+export async function loadRecentOrdersForContact(
+  contactId: string,
+  limit = 20,
+): Promise<ContactOrderSummaryRow[]> {
+  const rows = await db
+    .select({
+      id: orders.id,
+      status: orders.status,
+      value: orders.value,
+      afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
+      currency: orders.currency,
+      capiSent: orders.capiSent,
+      orderEventAt: orders.orderEventAt,
+      createdAt: orders.createdAt,
+      ctwaSessionId: orders.ctwaSessionId,
+      manualMetaCampaignId: orders.manualMetaCampaignId,
+    })
+    .from(orders)
+    .where(eq(orders.contactId, contactId))
+    .orderBy(desc(orders.orderEventAt))
+    .limit(limit);
+
+  const orderIds = rows.map((r) => r.id);
+  const manualCampaignIds = [
+    ...new Set(
+      rows
+        .map((r) => r.manualMetaCampaignId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const ctwaSessionIds = [
+    ...new Set(
+      rows
+        .map((r) => r.ctwaSessionId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+
+  const [linesByOrder, manualCampaignRows, ctwaCampaignRows] = await Promise.all([
+    loadOrderLineSummaries(orderIds).then(groupLinesByOrderId),
+    manualCampaignIds.length > 0
+      ? db
+          .select({ id: metaCampaigns.id, name: metaCampaigns.name })
+          .from(metaCampaigns)
+          .where(inArray(metaCampaigns.id, manualCampaignIds))
+      : Promise.resolve([]),
+    ctwaSessionIds.length > 0
+      ? db
+          .select({
+            sessionId: ctwaSessions.id,
+            name: metaCampaigns.name,
+          })
+          .from(ctwaSessions)
+          .leftJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
+          .leftJoin(metaCampaigns, eq(metaAds.metaCampaignId, metaCampaigns.id))
+          .where(inArray(ctwaSessions.id, ctwaSessionIds))
+      : Promise.resolve([]),
+  ]);
+
+  const manualNameById = new Map(
+    manualCampaignRows.map((r) => [r.id, r.name?.trim() || null]),
+  );
+  const ctwaNameBySessionId = new Map(
+    ctwaCampaignRows.map((r) => [r.sessionId, r.name?.trim() || null]),
+  );
+
+  return rows.map((r) => {
+    const derived = estimateAfnWholeFromStoredUsd(
+      Number(r.value),
+      r.afnPerUsdSnapshot,
+    );
+    const ctwaName = r.ctwaSessionId
+      ? (ctwaNameBySessionId.get(r.ctwaSessionId) ?? null)
+      : null;
+    const manualName = r.manualMetaCampaignId
+      ? (manualNameById.get(r.manualMetaCampaignId) ?? null)
+      : null;
+    const campaignName = ctwaName ?? manualName;
+    const campaignVia: ContactOrderSummaryRow["campaignVia"] = ctwaName
+      ? "ctwa"
+      : manualName
+        ? "manual"
+        : null;
+
+    const itemLines = (linesByOrder.get(r.id) ?? []).map((line) => ({
+      productName: line.productName,
+      quantity: line.quantity,
+    }));
+
+    return {
+      id: r.id,
+      status: r.status,
+      value: String(r.value),
+      valueAfn: derived == null ? null : String(derived),
+      currency: r.currency,
+      capiSent: r.capiSent,
+      orderEventAt: r.orderEventAt,
+      createdAt: r.createdAt,
+      campaignName,
+      campaignVia,
+      ctwaSessionUnlinked: Boolean(r.ctwaSessionId) && !campaignName,
+      lines: itemLines,
+    };
+  });
+}
+
 export async function loadOrdersTableRows(options: {
   page: number;
   pageSize: number;

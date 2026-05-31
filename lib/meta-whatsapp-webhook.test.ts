@@ -5,6 +5,7 @@ import {
   coerceToMetaWhatsAppWebhookBody,
   extractMetaInboundContactJobs,
   extractMetaInboundMessageJobs,
+  extractMetaInboundMessageStats,
 } from "./meta-whatsapp-webhook";
 
 const textWithCtwa = {
@@ -251,6 +252,77 @@ const userReportedWaPayload = {
     },
   ],
 };
+
+const unavailable131060Payload = {
+  object: "whatsapp_business_account",
+  entry: [
+    {
+      id: "1699456911242528",
+      changes: [
+        {
+          value: {
+            messaging_product: "whatsapp",
+            metadata: {
+              display_phone_number: "93789979662",
+              phone_number_id: "1057963360741789",
+            },
+            contacts: [
+              {
+                profile: { name: "Ahmad Shoaib Farhoomand" },
+                wa_id: "93797840017",
+              },
+            ],
+            messages: [
+              {
+                from: "93797840017",
+                id: "wamid.test",
+                timestamp: "1780223323",
+                errors: [
+                  {
+                    code: 131060,
+                    title: "This message is unavailable.",
+                    message: "This message is unavailable.",
+                  },
+                ],
+                type: "unsupported",
+                unsupported: { type: "unknown" },
+              },
+            ],
+          },
+          field: "messages",
+        },
+      ],
+    },
+  ],
+};
+
+describe("extractMetaInboundMessageStats", () => {
+  it("counts CTWA + text on normal ad tap", () => {
+    expect(extractMetaInboundMessageStats(textWithCtwa)).toEqual({
+      inboundWithFrom: 1,
+      unavailable131060: 0,
+      withCtwaClidInPayload: 1,
+      inboundWithFromNoClid: 0,
+      unavailable131060NoClid: 0,
+      textWithBody: 1,
+    });
+  });
+
+  it("counts 131060 without clid (coexistence unavailable)", () => {
+    expect(extractMetaInboundMessageStats(unavailable131060Payload)).toEqual({
+      inboundWithFrom: 1,
+      unavailable131060: 1,
+      withCtwaClidInPayload: 0,
+      inboundWithFromNoClid: 1,
+      unavailable131060NoClid: 1,
+      textWithBody: 0,
+    });
+    expect(extractMetaInboundMessageJobs(unavailable131060Payload)).toEqual([]);
+    expect(extractMetaInboundContactJobs(unavailable131060Payload)).toHaveLength(
+      1,
+    );
+  });
+});
 
 describe("user-reported CTWA payload (Jan 2026)", () => {
   it("extracts job + contact phone key for DB path", () => {
