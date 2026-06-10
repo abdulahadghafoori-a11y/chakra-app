@@ -192,11 +192,7 @@ export async function POST(request: Request) {
           sendTime: job.sendTime,
         })
         .onConflictDoNothing({
-          target: [
-            ctwaSessions.contactId,
-            ctwaSessions.ctwaClid,
-            ctwaSessions.sendTime,
-          ],
+          target: [ctwaSessions.contactId, ctwaSessions.ctwaClid],
         })
         .returning({ id: ctwaSessions.id });
 
@@ -211,7 +207,6 @@ export async function POST(request: Request) {
             and(
               eq(ctwaSessions.contactId, contact.id),
               eq(ctwaSessions.ctwaClid, job.ctwaClid),
-              eq(ctwaSessions.sendTime, job.sendTime),
             ),
           )
           .limit(1);
@@ -220,7 +215,7 @@ export async function POST(request: Request) {
           ctwaDuplicateKey++;
         } else {
           console.error(
-            "[whatsapp webhook] CTWA insert skipped but no row matched (contact/sendTime/clid)",
+            "[whatsapp webhook] CTWA insert skipped but no row matched (contact/clid)",
             { contactId: contact.id, ctwaClidLen: job.ctwaClid.length },
           );
         }
@@ -299,7 +294,7 @@ export async function POST(request: Request) {
     ctwa: {
       processed: ctwaProcessed,
       errors: ctwaErrors,
-      /** New rows vs same `(contact_id, ctwa_clid, send_time)` already in DB (replay / double delivery). */
+      /** New rows vs same `(contact_id, ctwa_clid)` already in DB (replay / double delivery). */
       inserted: ctwaInsertedNew,
       duplicateKey: ctwaDuplicateKey,
     },

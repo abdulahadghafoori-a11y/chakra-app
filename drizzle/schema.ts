@@ -212,8 +212,8 @@ export const adInsightsDaily = pgTable(
 );
 
 /**
- * One row per CTWA referral session (unique on contact + clid + send_time).
- * `send_time` is the earliest of message send vs envelope time (and legacy ingest time on migrate).
+ * One row per CTWA referral session (unique on contact + clid).
+ * `send_time` is message `timestamp` from the first ingested webhook for that click.
  * Phone and display name live on `contacts` via `contact_id`.
  * `waba_id` is Meta WhatsApp Business Account id (`entry.id` on Cloud API webhooks).
  * `phone_number_id` is Cloud API `metadata.phone_number_id` for the receiving number.
@@ -242,10 +242,9 @@ export const ctwaSessions = pgTable(
     index("ctwa_sessions_contact_id_idx").on(t.contactId),
     index("ctwa_sessions_ctwa_clid_idx").on(t.ctwaClid),
     index("ctwa_sessions_meta_ad_id_idx").on(t.metaAdId),
-    uniqueIndex("ctwa_sessions_contact_ctwa_send_unique").on(
+    uniqueIndex("ctwa_sessions_contact_ctwa_clid_unique").on(
       t.contactId,
       t.ctwaClid,
-      t.sendTime,
     ),
   ],
 );

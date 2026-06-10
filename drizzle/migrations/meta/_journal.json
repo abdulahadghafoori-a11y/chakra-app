@@ -295,6 +295,13 @@
       "when": 1776563966000,
       "tag": "0041_orders_capi_waba_id",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1776563966100,
+      "tag": "0042_ctwa_sessions_one_per_clid",
+      "breakpoints": true
     }
   ]
 }
