@@ -25,6 +25,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
   const multiSessionNotifyKeyRef = useRef<string | null>(null);
 
   const phone = form.watch("phone");
+  const salesChannel = form.watch("salesChannel");
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -66,7 +67,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
         .finally(() => setLoadingPhoneData(false));
     }, 450);
     return () => clearTimeout(t);
-  }, [phone, form]);
+  }, [phone, salesChannel, form]);
 
   useEffect(() => {
     if (loadingPhoneData || sessions.length <= 1) return;
@@ -81,7 +82,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
   }, [loadingPhoneData, phone, sessions.length]);
 
   useEffect(() => {
-    if (contactPhase.status === "not_found") {
+    if (contactPhase.status === "not_found" && salesChannel !== "offline") {
       form.setError("phone", {
         type: "manual",
         message:
@@ -90,7 +91,7 @@ export function usePhoneLookup(form: UseFormReturn<FormValues>) {
     } else {
       form.clearErrors("phone");
     }
-  }, [contactPhase, form]);
+  }, [contactPhase, salesChannel, form]);
 
   return { sessions, contactOrders, loadingPhoneData, contactPhase, phone };
 }

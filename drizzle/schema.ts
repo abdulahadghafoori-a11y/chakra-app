@@ -27,6 +27,8 @@ export const contacts = pgTable(
     countryCode: text("country_code"),
     countryName: text("country_name"),
     createTime: timestamp("create_time", { withTimezone: true }).notNull(),
+    /** `whatsapp` from Cloud API webhooks; `offline` = in-store / no WhatsApp thread. */
+    source: text("source").notNull().default("whatsapp"),
   },
   (t) => [uniqueIndex("contacts_phone_number_unique").on(t.phoneNumber)],
 );
@@ -474,6 +476,11 @@ export const orders = pgTable(
     status: text("status").notNull(),
     capiSent: boolean("capi_sent").notNull().default(false),
     capiEventId: text("capi_event_id"),
+    /**
+     * Meta WABA used for Purchase CAPI (from CTWA session or staff picker).
+     * Maps to `META_WABA_ACCOUNTS` for dataset routing on resend.
+     */
+    capiWabaId: text("capi_waba_id"),
     /** Optional: delivery / RTO / COD handling costs for contribution math (COD campaigns). */
     deliveryCost: numeric("delivery_cost", { precision: 14, scale: 4 })
       .notNull()
@@ -498,6 +505,17 @@ export const orders = pgTable(
      * Distinct from database insert time (`created_at`).
      */
     orderEventAt: timestamp("order_event_at", { withTimezone: true }).notNull(),
+    /**
+     * Campaign P&amp;L / lead date: CTWA session `send_time` snapshot or staff-picked day
+     * for manual campaign attribution. Null when the order is not campaign-attributed.
+     */
+    campaignAttributedAt: timestamp("campaign_attributed_at", {
+      withTimezone: true,
+    }),
+    /**
+     * `online` = WhatsApp / Meta path (may send CAPI). `offline` = in-store; excluded from campaign rollups.
+     */
+    salesChannel: text("sales_channel").notNull().default("online"),
     /** Exact time this row was inserted (server clock). */
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -512,6 +530,8 @@ export const orders = pgTable(
     index("orders_ctwa_session_id_idx").on(t.ctwaSessionId),
     index("orders_manual_meta_campaign_id_idx").on(t.manualMetaCampaignId),
     index("orders_order_event_at_idx").on(desc(t.orderEventAt)),
+    index("orders_campaign_attributed_at_idx").on(desc(t.campaignAttributedAt)),
+    index("orders_sales_channel_idx").on(t.salesChannel),
     index("orders_created_idx").on(desc(t.createdAt)),
   ],
 );
@@ -566,21 +586,148 @@ export const orderExpenses = pgTable(
   (t) => [index("order_expenses_order_id_idx").on(t.orderId)],
 );
 
-/** General overhead (rent, electricity) — not tied to an order; excluded from campaign rollups in v1. */
+/** Staff-managed overhead types (rent, fuel, etc.). */
+export const expenseCategories = pgTable(
+  "expense_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    kind: text("kind").notNull().default("other"),
+    colorKey: text("color_key").notNull().default("slate"),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("expense_categories_name_unique").on(t.name),
+    uniqueIndex("expense_categories_slug_unique").on(t.slug),
+  ],
+);
+
+/** General overhead — not tied to an order; excluded from campaign rollups. */
 export const businessExpenses = pgTable(
   "business_expenses",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    category: text("category").notNull(),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => expenseCategories.id, { onDelete: "restrict" }),
     amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    amountAfn: numeric("amount_afn", { precision: 18, scale: 0 }).notNull(),
+    afnPerUsdSnapshot: numeric("afn_per_usd_snapshot", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
     currency: text("currency").notNull().default("USD"),
+    vendor: text("vendor"),
+    receiptRef: text("receipt_ref"),
     note: text("note"),
     incurredDate: date("incurred_date", { mode: "string" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
-  (t) => [index("business_expenses_incurred_date_idx").on(t.incurredDate)],
+  (t) => [
+    index("business_expenses_incurred_date_idx").on(t.incurredDate),
+    index("business_expenses_category_id_idx").on(t.categoryId),
+  ],
+);
+
+export const employees = pgTable(
+  "employees",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    role: text("role"),
+    phone: text("phone"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("employees_is_active_idx").on(t.isActive)],
+);
+
+/**
+ * Bank / card outflows (Meta billing milestones, SaaS renewals). Cash-basis source of truth
+ * for card charges; optional linked row in `business_expenses` when mirroring to overhead.
+ */
+export const cardPayments = pgTable(
+  "card_payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => expenseCategories.id, { onDelete: "restrict" }),
+    /** Date the bank or card provider charged you. */
+    paidAt: date("paid_at", { mode: "string" }).notNull(),
+    /** Who charged the card, e.g. Meta, hosting provider. */
+    payee: text("payee").notNull(),
+    amountAfn: numeric("amount_afn", { precision: 18, scale: 0 }).notNull(),
+    afnPerUsdSnapshot: numeric("afn_per_usd_snapshot", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    /** Bank SMS / statement reference. */
+    statementRef: text("statement_ref"),
+    /** Provider invoice or billing id (e.g. Meta). */
+    externalRef: text("external_ref"),
+    note: text("note"),
+    linkedExpenseId: uuid("linked_expense_id").references(
+      () => businessExpenses.id,
+      { onDelete: "set null" },
+    ),
+    /**
+     * Meta daily insights window this charge pays for (often before `paid_at`).
+     * With {@link insightsSpendUsd} + {@link cashScaleFactor}, reconciles bank AFN to Insights USD.
+     */
+    insightsPeriodStart: date("insights_period_start", { mode: "string" }),
+    insightsPeriodEnd: date("insights_period_end", { mode: "string" }),
+    insightsSpendUsd: numeric("insights_spend_usd", { precision: 14, scale: 4 }),
+    /** `amount` USD ÷ insights spend USD for the period above. */
+    cashScaleFactor: numeric("cash_scale_factor", { precision: 18, scale: 6 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("card_payments_paid_at_idx").on(t.paidAt),
+    index("card_payments_category_id_idx").on(t.categoryId),
+    uniqueIndex("card_payments_linked_expense_id_unique").on(t.linkedExpenseId),
+  ],
+);
+
+export const payrollPayments = pgTable(
+  "payroll_payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "restrict" }),
+    paidAt: date("paid_at", { mode: "string" }).notNull(),
+    periodLabel: text("period_label"),
+    amountAfn: numeric("amount_afn", { precision: 18, scale: 0 }).notNull(),
+    afnPerUsdSnapshot: numeric("afn_per_usd_snapshot", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("payroll_payments_paid_at_idx").on(t.paidAt),
+    index("payroll_payments_employee_id_idx").on(t.employeeId),
+  ],
 );
 
 /** FB Page + IG comments ingested from Meta webhooks; staff moderate via Graph API. */
@@ -685,4 +832,8 @@ export type Product = typeof products.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type OrderExpense = typeof orderExpenses.$inferSelect;
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
 export type BusinessExpense = typeof businessExpenses.$inferSelect;
+export type Employee = typeof employees.$inferSelect;
+export type PayrollPayment = typeof payrollPayments.$inferSelect;
+export type CardPayment = typeof cardPayments.$inferSelect;

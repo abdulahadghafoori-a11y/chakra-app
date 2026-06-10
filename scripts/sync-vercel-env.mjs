@@ -5,7 +5,7 @@
  *
  * Production MVP (core) env hints (set in Dashboard or sync from .env.local):
  * - DATABASE_URL — production Postgres (never push a dev-branch URL here)
- * - META_DATASET_ID (or META_PIXEL_ID), META_ACCESS_TOKEN
+ * - META_WABA_ACCOUNTS, META_ACCESS_TOKEN
  * - Omit META_TEST_EVENT_CODE in production so CAPI sends real Purchase events
  * - META_APP_SECRET (WhatsApp POST signature), webhook verify token(s)
  * - SALES_AGENT_ENABLED unset/false for minimal WhatsApp agent surface
@@ -25,9 +25,7 @@ const KEYS = [
   "DATABASE_URL",
   "FEATURE_SET",
   "META_ACCESS_TOKEN",
-  "META_DATASET_ID",
-  "META_PIXEL_ID",
-  "META_WHATSAPP_BUSINESS_ACCOUNT_ID",
+  "META_WABA_ACCOUNTS",
   "META_TEST_EVENT_CODE",
   "META_WHATSAPP_VERIFY_TOKEN",
   "META_PAGE_WEBHOOK_VERIFY_TOKEN",
@@ -43,7 +41,6 @@ const KEYS = [
   "META_WEBHOOK_DEBUG",
   "CHAKRA_WEBHOOK_SECRET",
   "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_PHONE_NUMBER_ID",
   "SALES_AGENT_ENABLED",
   "SALES_AGENT_SEND_WHATSAPP",
   "SALES_AGENT_UPSERT_CONTACT",

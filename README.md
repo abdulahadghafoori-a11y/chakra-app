@@ -27,8 +27,7 @@ Repository: [github.com/abdulahadghafoori-a11y/chakra-app](https://github.com/ab
 
    - `DATABASE_URL` — Neon connection string (pooled URL is fine for serverless).
    - `META_ACCESS_TOKEN` — from Meta Business / System User.
-   - `META_DATASET_ID` — the **Dataset ID** from Meta Events Manager (same value used in the CAPI `/{dataset-id}/events` path). If unset, `META_PIXEL_ID` is still read for backward compatibility (same numeric id).
-   - `META_WHATSAPP_BUSINESS_ACCOUNT_ID` — optional **fallback** WABA if a CTWA session row has no `waba_id`.
+   - `META_WABA_ACCOUNTS` — JSON array of WhatsApp business lines (`id`, `label`, `datasetId`, `phoneNumberId`). Run `npm run meta:waba-dataset -- <WABA_ID>` per account to resolve `datasetId`. Staff pick the line in **Create order** when there is no CTWA session or no `ctwa_clid`.
    - `META_TEST_EVENT_CODE` — **required** when not in production (`next dev`): CAPI sends `TestEvent` with this code. In production (`NODE_ENV=production`) it is **not** read; CAPI sends live `Purchase` events only.
    - `META_WHATSAPP_VERIFY_TOKEN` — string you choose; Meta sends it on webhook **GET** verification.
    - `META_APP_SECRET` — Meta App Secret; when set, **POST** webhooks must include a valid `X-Hub-Signature-256` (`sha256=…` HMAC of the raw body). Omit in local dev only if you accept unsigned POSTs.
@@ -83,8 +82,7 @@ SSH: `git@github.com:abdulahadghafoori-a11y/chakra-app.git`
    |----------|--------|
    | `DATABASE_URL` | Neon pooled string (use a Neon *production* branch/database for prod). |
    | `META_ACCESS_TOKEN` | Meta system user token. |
-   | `META_DATASET_ID` | Events Manager dataset id (CAPI). |
-   | `META_WHATSAPP_BUSINESS_ACCOUNT_ID` | Optional fallback if session has no `waba_id`. |
+   | `META_WABA_ACCOUNTS` | JSON array — one entry per WhatsApp Business Account (CAPI dataset + outbound phone id). |
    | `META_TEST_EVENT_CODE` | Required for Preview/local dev (test events). Omit or unused in production. |
    | `META_WHATSAPP_VERIFY_TOKEN` | Webhook GET verification. |
    | `META_APP_SECRET` | Webhook POST signature verification (recommended in production). |
@@ -131,9 +129,29 @@ Configure in **[Meta for Developers](https://developers.facebook.com/)** → you
 4. **Signature:** set `META_APP_SECRET` to your Meta **App Secret** so `X-Hub-Signature-256` is verified on POST.
 5. **Behavior:** For each inbound **messages** payload with a **`ctwa_clid`**, the app upserts **`contacts`** (phone = `wa_id` / `from` digits only, country via libphonenumber) and inserts **`ctwa_sessions`** with `waba_id` = `entry.id`, `phone_number_id` = `metadata.phone_number_id`, and referral fields. Messages without `ctwa_clid` return `ignored` and do not create contacts.
 
+### Dual WhatsApp Business Accounts (Meta direct + Chakra)
+
+Both lines can use the **same** callback URL: `GET/POST /api/webhooks/whatsapp`.
+
+| Source | Configure | Env |
+|--------|-----------|-----|
+| Meta Cloud API (direct) | Meta Developers → WhatsApp → Configuration | `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` |
+| Chakra Chat relay | Chakra dashboard webhook URL + secret | `CHAKRA_WEBHOOK_SECRET` |
+
+Set **`META_WABA_ACCOUNTS`** with one object per line. Example after running `npm run meta:waba-dataset` for each WABA id:
+
+```json
+[
+  { "id": "1949044442407684", "label": "Chakra main", "datasetId": "111", "phoneNumberId": "222" },
+  { "id": "1699456911242528", "label": "Direct Meta", "datasetId": "333", "phoneNumberId": "444" }
+]
+```
+
+Purchase CAPI posts to the **dataset** for the WABA on the order (`orders.capi_waba_id` or CTWA session when `ctwa_clid` is present).
+
 ## CAPI
 
-- This app sends **Graph API** `/{dataset-id}/events` from `lib/meta-capi.ts` (same numeric id shown as Dataset ID in Events Manager).
+- Purchase events use **Graph API** `/{dataset-id}/events` from `lib/meta-capi.ts`. The dataset id comes from `META_WABA_ACCOUNTS` for the chosen WABA (not a single global `META_DATASET_ID`).
 
 ## shadcn/ui
 

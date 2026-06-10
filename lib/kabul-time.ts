@@ -77,6 +77,32 @@ export function describeKabulLocalForMeta(value: string): {
   return { kabulLabel, unixSeconds };
 }
 
+const KABUL_DATE_ONLY_RE = /^(\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * `date` input value for a Kabul calendar day, e.g. `2025-01-15`.
+ * Stored instants use start of that day in Asia/Kabul (00:00:00+04:30).
+ */
+export function getDefaultKabulDateOnly(): string {
+  const s = new Date().toLocaleString("sv-SE", { timeZone: APP_DISPLAY_TIMEZONE });
+  const [date] = s.split(" ");
+  return date ?? "";
+}
+
+export function kabulDateOnlyToDate(value: string): Date {
+  const trimmed = value.trim();
+  const m = trimmed.match(KABUL_DATE_ONLY_RE);
+  if (!m) {
+    throw new Error("Invalid Kabul date; use YYYY-MM-DD");
+  }
+  const iso = `${m[1]}T00:00:00${KABUL_OFFSET}`;
+  const out = new Date(iso);
+  if (Number.isNaN(out.getTime())) {
+    throw new Error("Invalid Kabul date");
+  }
+  return out;
+}
+
 /** Meta rejects events with event_time more than ~7 days in the past. */
 export function isWithinMetaEventTimeWindow(
   d: Date,

@@ -3,14 +3,18 @@
  * @see https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages
  */
 
+import { resolvePhoneNumberIdForWaba } from "@/lib/whatsapp-waba-registry";
+
 const GRAPH_API_VERSION = "v25.0";
 
 export type SendWhatsAppTextParams = {
   /** International digits only (no +), same as `wa_id` / `from` in webhooks. */
   toWaIdDigits: string;
   body: string;
-  /** Cloud API phone number id (path segment). Defaults to WHATSAPP_PHONE_NUMBER_ID. */
+  /** Cloud API phone number id (path segment). From inbound webhook or WABA registry. */
   phoneNumberId?: string | null;
+  /** When `phoneNumberId` is missing, resolve send line from `META_WABA_ACCOUNTS`. */
+  wabaId?: string | null;
 };
 
 export type SendWhatsAppTextResult =
@@ -20,21 +24,28 @@ export type SendWhatsAppTextResult =
 function readAccessToken(): string {
   const t =
     process.env.WHATSAPP_ACCESS_TOKEN?.trim() ||
-    process.env.META_WHATSAPP_ACCESS_TOKEN?.trim();
+    process.env.META_WHATSAPP_ACCESS_TOKEN?.trim() ||
+    process.env.META_ACCESS_TOKEN?.trim();
   if (!t) {
     throw new Error(
-      "Missing WHATSAPP_ACCESS_TOKEN (or META_WHATSAPP_ACCESS_TOKEN)",
+      "Missing WHATSAPP_ACCESS_TOKEN, META_WHATSAPP_ACCESS_TOKEN, or META_ACCESS_TOKEN",
     );
   }
   return t.replace(/^=+/, "");
 }
 
-function defaultPhoneNumberId(): string {
-  const id = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
-  if (!id) {
-    throw new Error("Missing WHATSAPP_PHONE_NUMBER_ID");
+function resolvePhoneNumberId(params: SendWhatsAppTextParams): string {
+  const fromParam = params.phoneNumberId?.trim().replace(/^=+/, "");
+  if (fromParam) return fromParam;
+
+  const wabaId = params.wabaId?.trim();
+  if (wabaId) {
+    return resolvePhoneNumberIdForWaba(wabaId);
   }
-  return id.replace(/^=+/, "");
+
+  throw new Error(
+    "Missing phone_number_id for WhatsApp send (from inbound webhook or META_WABA_ACCOUNTS).",
+  );
 }
 
 /**
@@ -56,10 +67,7 @@ export async function sendWhatsAppText(
   let phoneId: string;
   try {
     token = readAccessToken();
-    phoneId = (params.phoneNumberId?.trim() || defaultPhoneNumberId()).replace(
-      /^=+/,
-      "",
-    );
+    phoneId = resolvePhoneNumberId(params);
   } catch (e) {
     return {
       ok: false,

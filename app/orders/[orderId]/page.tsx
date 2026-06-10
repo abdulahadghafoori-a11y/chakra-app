@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { OrderDetailClient } from "./order-detail-client";
+import { OrderSalesChannelBadge } from "@/components/contact-source-badge";
 import { Badge } from "@/components/ui/badge";
+import { formatStoredContactPhone } from "@/lib/phone-display";
 import { buttonVariants } from "@/components/ui/button";
 import { loadOrderDetail } from "@/lib/order-detail";
 import { listMetaCampaignsForManualAttribution } from "@/lib/campaigns-rollups";
@@ -48,14 +50,15 @@ export default async function OrderDetailPage({ params }: Props) {
               {order.id}
             </code>
             <Badge variant="secondary">{order.status}</Badge>
-            {order.capiSent ? (
+            <OrderSalesChannelBadge channel={order.salesChannel} />
+            {order.salesChannel === "offline" ? null : order.capiSent ? (
               <Badge variant="default">CAPI sent</Badge>
             ) : (
               <Badge variant="outline">CAPI pending</Badge>
             )}
           </div>
           <p className="text-muted-foreground max-w-full text-sm leading-relaxed break-words">
-            <span className="font-mono">{order.phone}</span>
+            <span className="font-mono">{formatStoredContactPhone(order.phone)}</span>
             {order.ctwaClid ? (
               <>
                 {" "}

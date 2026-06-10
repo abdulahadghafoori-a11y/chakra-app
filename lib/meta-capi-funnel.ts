@@ -9,6 +9,7 @@ import {
   normalizeMetaEnvId,
   resolveMetaPurchaseCapiPath,
 } from "@/lib/meta-capi-shared";
+import { resolveMetaDatasetIdForWaba } from "@/lib/whatsapp-waba-registry";
 import {
   hashCountryForMeta,
   hashExternalIdForMeta,
@@ -40,11 +41,14 @@ export type MetaFunnelBaseParams = {
   customData: Record<string, unknown>;
 };
 
-function resolveWabaId(wabaId: string | null): string {
-  return (
-    normalizeMetaEnvId(wabaId ?? undefined) ||
-    normalizeMetaEnvId(process.env.META_WHATSAPP_BUSINESS_ACCOUNT_ID)
-  );
+function requireWabaId(wabaId: string | null): string {
+  const id = normalizeMetaEnvId(wabaId ?? undefined);
+  if (!id) {
+    throw new Error(
+      "WhatsApp business account id is required for Meta funnel CAPI.",
+    );
+  }
+  return id;
 }
 
 export function buildMetaFunnelPayload(
@@ -69,7 +73,7 @@ export function buildMetaFunnelPayload(
           externalIdHash,
           countryHash,
           ctwaClid: clid,
-          wabaId: resolveWabaId(params.whatsappBusinessAccountId) || null,
+          wabaId: requireWabaId(params.whatsappBusinessAccountId),
         })
       : buildStandardCapiUserData({
           phHash,
@@ -103,16 +107,13 @@ export function buildMetaFunnelPayload(
 
 export async function postMetaEventsPayload(
   payload: Record<string, unknown>,
+  wabaId: string,
 ): Promise<{ ok: boolean; body: string }> {
-  const datasetId =
-    normalizeMetaEnvId(process.env.META_DATASET_ID) ||
-    normalizeMetaEnvId(process.env.META_PIXEL_ID);
+  const datasetId = resolveMetaDatasetIdForWaba(wabaId);
   const accessToken = process.env.META_ACCESS_TOKEN?.trim();
 
-  if (!datasetId || !accessToken) {
-    throw new Error(
-      "META_DATASET_ID and META_ACCESS_TOKEN must be set for CAPI funnel",
-    );
+  if (!accessToken) {
+    throw new Error("META_ACCESS_TOKEN must be set for CAPI funnel.");
   }
 
   if (!isProductionNodeEnv()) {

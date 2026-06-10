@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { createOrder, previewOrderCapiPayload } from "@/actions/order";
 import type { ProductRow } from "@/actions/products";
+import type { WhatsAppWabaAccountOption } from "@/actions/whatsapp-waba";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,14 @@ import {
   formatDateTimeKabul,
   getDefaultKabulDateTimeLocal,
 } from "@/lib/kabul-time";
+import {
+  formatContactSourceLabel,
+  formatOrderSalesChannelLabel,
+  isOrderSalesChannel,
+  ORDER_SALES_CHANNEL_OPTIONS,
+  type OrderSalesChannel,
+} from "@/lib/sales-channel";
+import { formatStoredContactPhone } from "@/lib/phone-display";
 import { ContactExistingOrders } from "@/components/new-order-form/contact-existing-orders";
 import {
   CtwaSessionAttributionFooter,
@@ -67,7 +76,9 @@ import {
   sessionOptionLabel,
   type FormValues,
 } from "@/components/new-order-form/shared";
+import { useCtwaSessionOrders } from "@/components/new-order-form/use-ctwa-session-orders";
 import { usePhoneLookup } from "@/components/new-order-form/use-phone-lookup";
+import { isOfflinePlaceholderPhone } from "@/lib/offline-contact-phone";
 import {
   newOrderFormSchema,
   orderStatuses,
@@ -89,18 +100,26 @@ import { ProvinceSearchCombobox } from "@/components/province-search-combobox";
 import { DraftNumericInput } from "@/components/draft-numeric-input";
 import { AFGHANISTAN_PROVINCES_OUTSIDE_KABUL } from "@/lib/afghanistan-provinces";
 import type { MetaCampaignPickerOption } from "@/lib/campaigns-rollups";
+import { orderFormNeedsWabaPicker } from "@/lib/order-capi-waba";
 
 export function NewOrderForm({
   products,
   metaCampaignOptions,
+  wabaAccountOptions,
   initialPhone,
+  initialSalesChannel,
+  initialOfflineContactName,
   initialFx,
   canStaffEditFx,
 }: {
   products: ProductRow[];
   metaCampaignOptions: MetaCampaignPickerOption[];
+  wabaAccountOptions: WhatsAppWabaAccountOption[];
   /** E.164 from `?phone=` (e.g. from Contacts) */
   initialPhone?: string;
+  /** From `?contactId=` when opening new order for an in-store contact. */
+  initialSalesChannel?: OrderSalesChannel;
+  initialOfflineContactName?: string;
   /** Current AFN per 1 USD; required to convert AFN inputs to stored USD server-side */
   initialFx: PublicFxState | null;
   canStaffEditFx: boolean;
@@ -123,12 +142,16 @@ export function NewOrderForm({
     resolver: zodResolver(newOrderFormSchema),
     defaultValues: {
       phone: initialPhone?.trim() ?? "",
+      salesChannel: initialSalesChannel ?? "online",
+      offlineContactName: initialOfflineContactName ?? "",
       ctwaSessionId: "",
+      capiWabaId: "",
       lines: [defaultLine(products, fxRateValid, initialFx?.afnPerOneUsd ?? 0)],
       status: "confirmed",
       capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
       deliveryCost: 0,
       manualMetaCampaignId: "",
+      manualCampaignAttributedAtKabul: getDefaultKabulDateTimeLocal(),
       interProvinceAfghanistanDelivery: false,
       deliveryProvinceAfghanistan: "",
       deliveryTrackingNumber: "",
@@ -149,10 +172,25 @@ export function NewOrderForm({
     }
   }, [initialPhone, setValue]);
 
+  useEffect(() => {
+    if (initialSalesChannel) {
+      setValue("salesChannel", initialSalesChannel);
+    }
+  }, [initialSalesChannel, setValue]);
+
+  useEffect(() => {
+    if (initialOfflineContactName?.trim()) {
+      setValue("offlineContactName", initialOfflineContactName.trim());
+    }
+  }, [initialOfflineContactName, setValue]);
+
   const phoneTrimmed = (phone ?? "").trim();
   const phoneOk = isValidE164Input(phoneTrimmed);
 
   const interProvince = form.watch("interProvinceAfghanistanDelivery");
+  const manualMetaCampaignId = form.watch("manualMetaCampaignId");
+  const salesChannel = form.watch("salesChannel");
+  const isInStore = salesChannel === "offline";
 
   const watchedLines =
     useWatch({
@@ -172,6 +210,11 @@ export function NewOrderForm({
       sessions.find((s) => s.id === ctwaSessionId) ?? latestSession,
     [sessions, ctwaSessionId, latestSession],
   );
+  const { orders: ctwaSessionOrders, loading: loadingCtwaSessionOrders } =
+    useCtwaSessionOrders(
+      ctwaSessionId,
+      !isInStore && Boolean((ctwaSessionId ?? "").trim()),
+    );
 
   useEffect(() => {
     if (!interProvince) {
@@ -188,10 +231,34 @@ export function NewOrderForm({
   }, [sessions.length, setValue]);
 
   const hasNoCtwaSession =
+    !isInStore &&
     contactPhase.status === "found" &&
     !loadingPhoneData &&
     sessions.length === 0 &&
     phoneOk;
+
+  const needsWabaPicker =
+    !isInStore &&
+    contactPhase.status === "found" &&
+    !loadingPhoneData &&
+    phoneOk &&
+    orderFormNeedsWabaPicker({
+      isInStore,
+      sessions,
+      selectedSessionId: ctwaSessionId,
+    });
+
+  const capiWabaId = form.watch("capiWabaId");
+  const selectedWabaLabel = useMemo(
+    () => wabaAccountOptions.find((w) => w.id === capiWabaId)?.label ?? null,
+    [wabaAccountOptions, capiWabaId],
+  );
+
+  useEffect(() => {
+    if (!needsWabaPicker) {
+      setValue("capiWabaId", "");
+    }
+  }, [needsWabaPicker, setValue]);
 
   const orderTotalAfn = useMemo(() => {
     return (watchedLines ?? []).reduce((sum, line) => {
@@ -290,14 +357,33 @@ export function NewOrderForm({
   const isDevReviewUi = process.env.NODE_ENV === "development";
 
   const contactPresentation =
-    contactPhase.status === "found"
+    contactPhase.status === "found" &&
+    !isOfflinePlaceholderPhone(contactPhase.contact.phoneNumber)
       ? getPhonePresentation(contactPhase.contact.phoneNumber)
       : null;
+  const reviewContactPhone =
+    contactPhase.status === "found"
+      ? isOfflinePlaceholderPhone(contactPhase.contact.phoneNumber)
+        ? ""
+        : contactPhase.contact.phoneNumber
+      : phoneTrimmed;
+  const reviewContactName =
+    contactPhase.status === "found"
+      ? contactPhase.contact.name
+      : reviewValues?.offlineContactName?.trim() || null;
+  const reviewPhonePresentation =
+    reviewContactPhone && isValidE164Input(reviewContactPhone)
+      ? getPhonePresentation(reviewContactPhone)
+      : null;
+  const phoneEntered = phoneTrimmed.length > 0;
+  const phoneValidForChannel =
+    isInStore ? !phoneEntered || phoneOk : phoneOk;
+  const contactReady = isInStore || contactPhase.status === "found";
   const submitDisabled =
     pending ||
     loadingPhoneData ||
-    !phoneOk ||
-    contactPhase.status !== "found" ||
+    !phoneValidForChannel ||
+    !contactReady ||
     !fxRateValid;
 
   function runCreateOrder(values: FormValues) {
@@ -334,8 +420,11 @@ export function NewOrderForm({
           try {
             const meta = JSON.parse(res.capiPayloadJson) as {
               capiDeferred?: boolean;
+              capiOffline?: boolean;
             };
-            if (meta.capiDeferred) {
+            if (meta.capiOffline) {
+              summary = `Order ${res.orderId} saved (in-store — no Meta event).`;
+            } else if (meta.capiDeferred) {
               summary = `Order ${res.orderId} saved. Meta Purchase will be sent when status is Confirmed, Shipped, or Paid.`;
             }
           } catch {
@@ -347,11 +436,15 @@ export function NewOrderForm({
         form.reset({
           phone: values.phone,
           ctwaSessionId: sessions[0]?.id ?? "",
+          capiWabaId: "",
           lines: [defaultLine(products, fxRateValid, initialFx?.afnPerOneUsd ?? 0)],
           status: "confirmed",
           capiEventTimeKabul: getDefaultKabulDateTimeLocal(),
           deliveryCost: 0,
           manualMetaCampaignId: "",
+          salesChannel: values.salesChannel,
+          offlineContactName: "",
+          manualCampaignAttributedAtKabul: getDefaultKabulDateTimeLocal(),
           interProvinceAfghanistanDelivery: false,
           deliveryProvinceAfghanistan: "",
           deliveryTrackingNumber: "",
@@ -361,9 +454,25 @@ export function NewOrderForm({
   }
 
   async function onSubmit(values: FormValues) {
-    if (contactPhase.status !== "found") {
+    if (values.salesChannel !== "offline" && contactPhase.status !== "found") {
       toast.error(
         "No contact found for this number. The customer must reach you on WhatsApp first.",
+      );
+      return;
+    }
+
+    const wabaRequired = orderFormNeedsWabaPicker({
+      isInStore: values.salesChannel === "offline",
+      sessions,
+      selectedSessionId: values.ctwaSessionId,
+    });
+    if (wabaRequired && !(values.capiWabaId ?? "").trim()) {
+      toast.error("Choose a WhatsApp business line for Meta CAPI.");
+      return;
+    }
+    if (wabaRequired && wabaAccountOptions.length === 0) {
+      toast.error(
+        "META_WABA_ACCOUNTS is not configured — ask staff to set up WhatsApp business lines.",
       );
       return;
     }
@@ -385,12 +494,10 @@ export function NewOrderForm({
       <CardHeader className="space-y-1 px-4 pb-4 pt-5 sm:px-6 sm:pt-6">
         <CardTitle className="text-lg sm:text-xl">New order</CardTitle>
         <CardDescription className="text-pretty leading-relaxed">
-          The phone must match a contact already in the system (from WhatsApp).
-          When creating as Confirmed, Shipped, or Paid we send Meta Purchase using the chosen
-          CTWA session (defaults to latest when there are several). Better{" "}
-          <code className="text-xs">ctwa_clid</code>&nbsp;matching); without it we
-          still send using phone + WhatsApp identifiers. You review the payload
-          before the order is created.
+          Online orders need a WhatsApp contact (or CTWA session). In-store sales
+          register the customer by phone with no Meta Purchase event and are excluded
+          from Campaign reports. You review the payload (or in-store summary) before
+          saving.
         </CardDescription>
       </CardHeader>
       <CardContent className="min-w-0 space-y-4 px-4 pb-6 sm:px-6">
@@ -412,7 +519,49 @@ export function NewOrderForm({
               <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Attribution
               </p>
-              {sessions.length > 1 ? (
+              <FormField
+                control={form.control}
+                name="salesChannel"
+                render={({ field }) => (
+                  <FormItem className="max-w-xs">
+                    <FormLabel>Sale channel</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={(v) => {
+                        if (v && isOrderSalesChannel(v)) {
+                          field.onChange(v);
+                          if (v === "offline") {
+                            setValue("ctwaSessionId", "");
+                            setValue("manualMetaCampaignId", "");
+                            setValue("manualCampaignAttributedAtKabul", "");
+                          }
+                        }
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Choose sale channel">
+                            {formatOrderSalesChannelLabel(field.value)}
+                          </SelectValue>
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {ORDER_SALES_CHANNEL_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      In-store orders never send Meta CAPI and do not count toward
+                      Campaign P&amp;L.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {!isInStore && sessions.length > 1 ? (
                 <div
                   className="flex gap-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-2.5 text-sm leading-relaxed"
                   role="alert"
@@ -435,17 +584,61 @@ export function NewOrderForm({
                   </div>
                 </div>
               ) : null}
+              {isInStore ? (
+                <div className="bg-muted/20 space-y-3 rounded-lg border border-dashed p-3">
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    Phone is optional for walk-in customers. Leave it blank if
+                    they did not share a number — a contact is still created when
+                    you save the order.
+                  </p>
+                  {contactPhase.status === "not_found" &&
+                  phoneOk &&
+                  phoneEntered &&
+                  !loadingPhoneData ? (
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      No contact for this number yet — they will be registered as
+                      in-store when you create the order.
+                    </p>
+                  ) : null}
+                  <FormField
+                    control={form.control}
+                    name="offlineContactName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs">Name (optional)</FormLabel>
+                        <FormControl>
+                          <Input
+                            className="h-9"
+                            placeholder="Customer name"
+                            {...field}
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              ) : null}
               <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
                 <FormField
                   control={form.control}
                   name="phone"
                   render={({ field }) => (
                     <FormItem className="min-w-0">
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>
+                        Phone
+                        {isInStore ? (
+                          <span className="text-muted-foreground font-normal">
+                            {" "}
+                            (optional)
+                          </span>
+                        ) : null}
+                      </FormLabel>
                       <FormControl>
                         <Input
                           className="h-10 min-h-10 font-mono text-base tabular-nums sm:h-9 sm:min-h-0 sm:text-sm"
-                          placeholder="+1 555…"
+                          placeholder={isInStore ? "+93 … or leave blank" : "+1 555…"}
                           autoComplete="tel"
                           inputMode="tel"
                           aria-busy={loadingPhoneData}
@@ -457,6 +650,7 @@ export function NewOrderForm({
                     </FormItem>
                   )}
                 />
+                {!isInStore ? (
                 <FormField
                   control={form.control}
                   name="ctwaSessionId"
@@ -534,7 +728,96 @@ export function NewOrderForm({
                     </FormItem>
                   )}
                 />
+                ) : null}
               </div>
+              {needsWabaPicker ? (
+                <FormField
+                  control={form.control}
+                  name="capiWabaId"
+                  render={({ field }) => (
+                    <FormItem className="max-w-md">
+                      <FormLabel>WhatsApp business line</FormLabel>
+                      {wabaAccountOptions.length === 0 ? (
+                        <p className="text-destructive text-xs leading-relaxed">
+                          No lines configured. Set{" "}
+                          <code className="text-[11px]">META_WABA_ACCOUNTS</code> in
+                          environment (see README).
+                        </p>
+                      ) : (
+                        <Select
+                          value={field.value || undefined}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="h-10 w-full min-w-0 sm:h-9">
+                              <SelectValue placeholder="Choose business line">
+                                {selectedWabaLabel ?? "Choose business line"}
+                              </SelectValue>
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {wabaAccountOptions.map((w) => (
+                              <SelectItem key={w.id} value={w.id}>
+                                {w.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <p className="text-muted-foreground text-xs leading-relaxed">
+                        {hasNoCtwaSession
+                          ? "No CTWA session — pick which WhatsApp Business Account should receive this Purchase in Events Manager."
+                          : "This session has no click id — pick which business line should receive the Meta event."}
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+              {!isInStore &&
+              ctwaSessionOrders.length > 0 &&
+              (ctwaSessionId ?? "").trim() ? (
+                <div
+                  className="flex gap-2.5 rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-2.5 text-sm leading-relaxed"
+                  role="alert"
+                >
+                  <AlertTriangleIcon
+                    className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 space-y-2">
+                    <p className="font-medium text-amber-950 dark:text-amber-50">
+                      {ctwaSessionOrders.length === 1
+                        ? "An order is already linked to this CTWA session"
+                        : `${ctwaSessionOrders.length} orders are already linked to this CTWA session`}
+                    </p>
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      Another order on the same session can duplicate Meta
+                      attribution. Open an existing order below or continue only if
+                      this is a separate legitimate sale.
+                    </p>
+                    <ul className="space-y-1 text-xs">
+                      {ctwaSessionOrders.map((o) => (
+                        <li key={o.id}>
+                          <Link
+                            href={`/orders/${o.id}`}
+                            className="text-foreground font-medium underline underline-offset-2"
+                          >
+                            {o.id}
+                          </Link>
+                          <span className="text-muted-foreground">
+                            {" "}
+                            · {o.status} · USD {o.valueUsd}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {loadingCtwaSessionOrders ? (
+                      <p className="text-muted-foreground text-xs">Checking…</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {hasNoCtwaSession ? (
                 <div className="bg-muted/20 space-y-3 rounded-lg border border-dashed p-3">
                   <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -542,8 +825,9 @@ export function NewOrderForm({
                   </p>
                   <p className="text-muted-foreground text-xs leading-relaxed">
                     This contact has <strong className="text-foreground font-medium">no</strong>{" "}
-                    WhatsApp CTWA session. Meta Purchase still sends (hashed phone + WABA, no{" "}
-                    <code className="text-[11px]">ctwa_clid</code>). Optionally link a synced
+                    WhatsApp CTWA session. Choose a business line above for Meta Purchase
+                    (hashed phone, no <code className="text-[11px]">ctwa_clid</code>).
+                    Optionally link a synced
                     campaign so revenue appears under{" "}
                     <strong className="text-foreground font-medium">Campaigns</strong>.
                   </p>
@@ -580,13 +864,48 @@ export function NewOrderForm({
                       )}
                     />
                   )}
+                  {(manualMetaCampaignId?.trim() ?? "").length > 0 ? (
+                    <FormField
+                      control={form.control}
+                      name="manualCampaignAttributedAtKabul"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">
+                            Campaign attribution date &amp; time{" "}
+                            <span className="text-muted-foreground font-normal">
+                              (Kabul)
+                            </span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              className="h-9 font-mono text-sm tabular-nums"
+                              type="datetime-local"
+                              step={60}
+                              name={field.name}
+                              onBlur={field.onBlur}
+                              ref={field.ref}
+                              value={field.value}
+                              onChange={field.onChange}
+                            />
+                          </FormControl>
+                          <p className="text-muted-foreground text-xs leading-relaxed">
+                            Lead instant for Campaign reports (first message or ad
+                            click), not the sale confirmation time below.
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
                 </div>
               ) : null}
               <p
                 id="phone-lookup-hint"
                 className="text-muted-foreground text-xs"
               >
-                Looks up the saved contact and CTWA sessions for this number.
+                {isInStore
+                  ? "Optional: looks up an existing contact and prior orders when you enter a number."
+                  : "Looks up the saved contact and CTWA sessions for this number."}
               </p>
               {loadingPhoneData ? (
                 <p className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -594,7 +913,7 @@ export function NewOrderForm({
                   Loading contact & sessions…
                 </p>
               ) : null}
-              {contactPhase.status === "found" && contactPresentation ? (
+              {contactPhase.status === "found" ? (
                 <div className="bg-muted/50 space-y-2 rounded-lg border p-3 text-sm">
                   <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                     Contact
@@ -609,18 +928,18 @@ export function NewOrderForm({
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Phone</dt>
                       <dd className="font-mono tabular-nums">
-                        {contactPresentation.formattedInternational}
+                        {formatStoredContactPhone(contactPhase.contact.phoneNumber)}
                       </dd>
                     </div>
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Country</dt>
                       <dd>
                         {contactPhase.contact.countryName ??
-                          contactPresentation.countryName ??
+                          contactPresentation?.countryName ??
                           "—"}
                         {(contactPhase.contact.countryCode ??
-                          contactPresentation.countryCode)
-                          ? ` (${contactPhase.contact.countryCode ?? contactPresentation.countryCode})`
+                          contactPresentation?.countryCode)
+                          ? ` (${contactPhase.contact.countryCode ?? contactPresentation?.countryCode})`
                           : null}
                       </dd>
                     </div>
@@ -628,6 +947,12 @@ export function NewOrderForm({
                       <dt className="text-muted-foreground">In system since</dt>
                       <dd>
                         {formatDateTimeKabul(contactPhase.contact.createTime)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-muted-foreground">Type</dt>
+                      <dd>
+                        {formatContactSourceLabel(contactPhase.contact.source)}
                       </dd>
                     </div>
                   </dl>
@@ -1032,7 +1357,7 @@ export function NewOrderForm({
                     render={({ field }) => (
                       <FormItem className="min-w-0">
                         <FormLabel>
-                          Event time{" "}
+                          Sale / event time{" "}
                           <span className="text-muted-foreground font-normal">
                             (Kabul · UTC+4:30)
                           </span>
@@ -1050,9 +1375,9 @@ export function NewOrderForm({
                           />
                         </FormControl>
                         <p className="text-muted-foreground text-xs leading-relaxed">
-                          Used for Meta CAPI <code className="text-xs">event_time</code>{" "}
-                          (Unix seconds, GMT) and the order timestamp. The value is the
-                          local date and time in Kabul, not your device timezone.
+                          {isInStore
+                            ? "When the in-store sale was recorded (order record only — no Meta event)."
+                            : "When the sale was confirmed (Meta CAPI event_time and order record). Campaign P&L uses the lead instant from CTWA or manual attribution above."}
                         </p>
                         <FormMessage />
                       </FormItem>
@@ -1072,6 +1397,8 @@ export function NewOrderForm({
                   <Loader2Icon className="mr-2 size-4 animate-spin" />
                   {reviewLoading ? "Preparing review…" : "Working…"}
                 </>
+              ) : isInStore ? (
+                "Review in-store order"
               ) : (
                 "Review & create order"
               )}
@@ -1091,7 +1418,11 @@ export function NewOrderForm({
         >
           <DialogContent className="flex h-[min(90dvh,40rem)] max-h-[min(90dvh,40rem)] w-[calc(100vw-1rem)] max-w-[42rem] flex-col gap-0 p-0 sm:h-auto sm:max-h-[min(90vh,40rem)] sm:w-full">
             <DialogHeader className="shrink-0 border-b px-4 py-3 sm:px-6 sm:py-4">
-              <DialogTitle>Review order &amp; CAPI payload</DialogTitle>
+              <DialogTitle>
+                {reviewValues?.salesChannel === "offline"
+                  ? "Review in-store order"
+                  : "Review order & CAPI payload"}
+              </DialogTitle>
               <DialogDescription>
                 {isDevReviewUi ? (
                   <>
@@ -1110,10 +1441,21 @@ export function NewOrderForm({
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 sm:py-4">
-              {reviewValues && contactPhase.status === "found" && reviewSummary ? (
+              {reviewValues &&
+              (contactPhase.status === "found" ||
+                reviewValues.salesChannel === "offline") &&
+              reviewSummary ? (
                 <div className="space-y-4 text-sm">
+                  {reviewValues.salesChannel === "offline" ? (
+                    <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs leading-relaxed">
+                      <strong className="text-foreground font-medium">In-store sale</strong>{" "}
+                      — no Meta Purchase event. This order is excluded from Campaign
+                      reports.
+                    </p>
+                  ) : null}
                   {isDevReviewUi ? (
                     <>
+                      {reviewValues.salesChannel !== "offline" ? (
                       <div>
                         <p className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
                           Attribution
@@ -1122,11 +1464,8 @@ export function NewOrderForm({
                           <div className="min-w-0 sm:col-span-2">
                             <dt className="text-muted-foreground">Phone</dt>
                             <dd className="font-mono tabular-nums">
-                              {
-                                getPhonePresentation(
-                                  contactPhase.contact.phoneNumber,
-                                ).formattedInternational
-                              }
+                              {reviewPhonePresentation?.formattedInternational ??
+                                reviewContactPhone}
                             </dd>
                           </div>
                           <div className="min-w-0 sm:col-span-2">
@@ -1146,19 +1485,38 @@ export function NewOrderForm({
                               </dd>
                             ) : null}
                           </div>
-                          {reviewSummary.ctwaSession?.wabaId ? (
-                            <div className="min-w-0 sm:col-span-2">
-                              <dt className="text-muted-foreground">WABA</dt>
-                              <dd className="font-mono text-xs break-all">
-                                {reviewSummary.ctwaSession.wabaId}
-                                {reviewSummary.ctwaSession.phoneNumberId
-                                  ? ` · phone_number_id ${reviewSummary.ctwaSession.phoneNumberId}`
-                                  : null}
-                              </dd>
-                            </div>
-                          ) : null}
+                          <div className="min-w-0 sm:col-span-2">
+                            <dt className="text-muted-foreground">WhatsApp business line</dt>
+                            <dd className="text-xs">
+                              {reviewSummary.ctwaSession?.ctwaClid?.trim() ? (
+                                <span className="font-mono break-all">
+                                  {reviewSummary.ctwaSession.wabaId ?? "—"}
+                                  {reviewSummary.ctwaSession.phoneNumberId
+                                    ? ` · phone_number_id ${reviewSummary.ctwaSession.phoneNumberId}`
+                                    : null}
+                                  <span className="text-muted-foreground">
+                                    {" "}
+                                    (from CTWA session)
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="font-medium">
+                                  {wabaAccountOptions.find(
+                                    (w) => w.id === reviewValues.capiWabaId,
+                                  )?.label ?? reviewValues.capiWabaId?.trim() ?? "—"}
+                                  {reviewValues.capiWabaId?.trim() ? (
+                                    <span className="text-muted-foreground font-mono font-normal">
+                                      {" "}
+                                      · WABA {reviewValues.capiWabaId}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              )}
+                            </dd>
+                          </div>
                         </dl>
                       </div>
+                      ) : null}
 
                       <div className="bg-muted/50 space-y-2 rounded-lg border p-3">
                         <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -1168,37 +1526,48 @@ export function NewOrderForm({
                           <div className="min-w-0 sm:col-span-2">
                             <dt className="text-muted-foreground">Name</dt>
                             <dd className="font-medium">
-                              {contactPhase.contact.name?.trim() || "—"}
+                              {reviewContactName?.trim() || "—"}
                             </dd>
                           </div>
                           <div className="min-w-0">
                             <dt className="text-muted-foreground">Phone</dt>
                             <dd className="font-mono tabular-nums">
-                              {
-                                getPhonePresentation(
-                                  contactPhase.contact.phoneNumber,
-                                ).formattedInternational
-                              }
+                              {reviewPhonePresentation?.formattedInternational ??
+                                reviewContactPhone}
                             </dd>
                           </div>
                           <div className="min-w-0">
                             <dt className="text-muted-foreground">Country</dt>
                             <dd>
-                              {contactPhase.contact.countryName ??
-                                contactPresentation?.countryName ??
-                                "—"}
-                              {(contactPhase.contact.countryCode ??
-                                contactPresentation?.countryCode)
-                                ? ` (${contactPhase.contact.countryCode ?? contactPresentation?.countryCode})`
+                              {contactPhase.status === "found"
+                                ? (contactPhase.contact.countryName ??
+                                  reviewPhonePresentation?.countryName ??
+                                  "—")
+                                : (reviewPhonePresentation?.countryName ?? "—")}
+                              {(contactPhase.status === "found"
+                                ? contactPhase.contact.countryCode
+                                : reviewPhonePresentation?.countryCode)
+                                ? ` (${contactPhase.status === "found" ? contactPhase.contact.countryCode : reviewPhonePresentation?.countryCode})`
                                 : null}
                             </dd>
                           </div>
-                          <div className="min-w-0 sm:col-span-2">
-                            <dt className="text-muted-foreground">
-                              In system since
-                            </dt>
-                            <dd>{formatDateTimeKabul(contactPhase.contact.createTime)}</dd>
-                          </div>
+                          {contactPhase.status === "found" ? (
+                            <div className="min-w-0 sm:col-span-2">
+                              <dt className="text-muted-foreground">
+                                In system since
+                              </dt>
+                              <dd>
+                                {formatDateTimeKabul(contactPhase.contact.createTime)}
+                              </dd>
+                            </div>
+                          ) : (
+                            <div className="min-w-0 sm:col-span-2">
+                              <dt className="text-muted-foreground">Customer</dt>
+                              <dd className="text-muted-foreground">
+                                New in-store contact (created on save)
+                              </dd>
+                            </div>
+                          )}
                         </dl>
                       </div>
                     </>
@@ -1211,17 +1580,14 @@ export function NewOrderForm({
                         <div>
                           <dt className="text-muted-foreground text-xs">Name</dt>
                           <dd className="font-medium">
-                            {contactPhase.contact.name?.trim() || "—"}
+                            {reviewContactName?.trim() || "—"}
                           </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground text-xs">Phone</dt>
                           <dd className="font-mono text-sm tabular-nums">
-                            {
-                              getPhonePresentation(
-                                contactPhase.contact.phoneNumber,
-                              ).formattedInternational
-                            }
+                            {reviewPhonePresentation?.formattedInternational ??
+                              reviewContactPhone}
                           </dd>
                         </div>
                       </dl>
@@ -1230,7 +1596,9 @@ export function NewOrderForm({
 
                   <div className="bg-muted/40 rounded-lg border px-3 py-2 text-xs">
                     <p className="text-muted-foreground font-medium tracking-wide uppercase">
-                      CAPI event time
+                      {reviewValues.salesChannel === "offline"
+                        ? "Sale time"
+                        : "CAPI event time"}
                     </p>
                     <p className="mt-1 break-words font-mono tabular-nums leading-relaxed">
                       {(() => {
@@ -1433,7 +1801,9 @@ export function NewOrderForm({
               {reviewPayloadJson ? (
                 <div>
                   <p className="text-muted-foreground mb-2 text-xs font-medium uppercase">
-                    CAPI JSON (preview)
+                    {reviewValues?.salesChannel === "offline"
+                      ? "In-store summary"
+                      : "CAPI JSON (preview)"}
                   </p>
                   <pre className="bg-muted/50 max-h-[min(50vh,22rem)] overflow-auto break-words rounded-lg border p-3 text-[0.7rem] leading-relaxed sm:text-xs">
                     {reviewPayloadJson}

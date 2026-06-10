@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 
 export type OrderDetailLine = {
   lineIndex: number;
+  productId: string;
   productName: string | null;
   quantity: number;
   unitSalePrice: string;
@@ -45,6 +46,7 @@ export type OrderDetail = {
   /** Derived from merchandise `value` USD + snapshot */
   valueAfn: string | null;
   capiSent: boolean;
+  salesChannel: string;
   /** Checkout / Meta wall clock from form (Asia/Kabul). */
   orderEventAt: Date;
   /** Database row insert time. */
@@ -75,6 +77,7 @@ export async function loadOrderDetail(orderId: string) {
       afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
       capiSent: orders.capiSent,
       capiEventId: orders.capiEventId,
+      salesChannel: orders.salesChannel,
       orderEventAt: orders.orderEventAt,
       createdAt: orders.createdAt,
     })
@@ -92,6 +95,7 @@ export async function loadOrderDetail(orderId: string) {
   const lines = await db
     .select({
       lineIndex: orderItems.lineIndex,
+      productId: orderItems.productId,
       productName: products.name,
       quantity: orderItems.quantity,
       unitSalePrice: orderItems.unitSalePrice,
@@ -130,6 +134,7 @@ export async function loadOrderDetail(orderId: string) {
       estimateAfnWholeFromStoredUsd(Number(orderRow.value), snap),
     ),
     capiSent: orderRow.capiSent,
+    salesChannel: orderRow.salesChannel,
     orderEventAt: orderRow.orderEventAt,
     createdAt: orderRow.createdAt,
     lines: lines.map((l) => {
@@ -137,6 +142,7 @@ export async function loadOrderDetail(orderId: string) {
       const lineUsd = Number(l.lineValue);
       return {
         lineIndex: l.lineIndex,
+        productId: l.productId,
         productName: l.productName,
         quantity: l.quantity,
         unitSalePrice: String(l.unitSalePrice),

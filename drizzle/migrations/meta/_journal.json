@@ -246,6 +246,55 @@
       "when": 1776563965300,
       "tag": "0034_meta_marketing_activities",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1776563965400,
+      "tag": "0035_orders_campaign_attributed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1776563965500,
+      "tag": "0036_contact_source_order_sales_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1776563965600,
+      "tag": "0037_expense_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1776563965700,
+      "tag": "0038_payroll",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1776563965800,
+      "tag": "0039_card_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1776563965900,
+      "tag": "0040_card_payment_insights_reconcile",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1776563966000,
+      "tag": "0041_orders_capi_waba_id",
+      "breakpoints": true
     }
   ]
 }

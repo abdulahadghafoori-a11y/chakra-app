@@ -123,8 +123,8 @@ export default async function CampaignDetailPage({
     ),
     listAttributedOrdersForCampaign(
       campaignId,
-      parsedRange.sinceIso,
-      parsedRange.untilIso,
+      parsedRange.sinceDay,
+      parsedRange.untilDay,
       250,
     ),
     listCampaignActivityRows(campaignId, 400, {
@@ -132,8 +132,8 @@ export default async function CampaignDetailPage({
     }),
     getCampaignAttributionSplit(
       campaignId,
-      parsedRange.sinceIso,
-      parsedRange.untilIso,
+      parsedRange.sinceDay,
+      parsedRange.untilDay,
     ),
     loadCampaignStructureSubtree(campaignId),
   ]);
@@ -167,6 +167,7 @@ export default async function CampaignDetailPage({
 
   const ordersSerialized = attributedOrders.map((r) => ({
     orderId: r.orderId,
+    campaignAttributedAtIso: r.campaignAttributedAt.toISOString(),
     orderEventAtIso: r.orderEventAt.toISOString(),
     status: r.status,
     valueUsd: r.valueUsd,

@@ -22,6 +22,7 @@ import {
 import type { CampaignPnLFractions } from "@/lib/campaign-pnl-params";
 import type { CampaignPerformanceRow } from "@/lib/campaigns-rollups";
 import type { CampaignVerdict } from "@/lib/campaign-verdict";
+import { formatDateTimeKabul } from "@/lib/kabul-time";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -102,6 +103,7 @@ type ActivityRow = {
 
 type SerializedOrder = {
   orderId: string;
+  campaignAttributedAtIso: string;
   orderEventAtIso: string;
   status: string;
   valueUsd: string;
@@ -690,8 +692,9 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
         <CardHeader>
           <CardTitle className="text-base">Attributed orders</CardTitle>
           <CardDescription>
-            Newest first. “Last buyer CTWA” is the latest WhatsApp referral
-            timestamp for this customer across CTWA sessions.
+            Filtered by lead day (Kabul) in the selected range. Lead date is
+            first ad message or your manual attribution date; sale date is when
+            the order was confirmed.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -699,7 +702,8 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
             <TableHeader>
               <TableRow>
                 <TableHead>Order</TableHead>
-                <TableHead>When</TableHead>
+                <TableHead>Lead (Kabul)</TableHead>
+                <TableHead>Sale (Kabul)</TableHead>
                 <TableHead>Path</TableHead>
                 <TableHead className="whitespace-nowrap">
                   Last buyer CTWA
@@ -718,7 +722,12 @@ export function CampaignDetailClient(props: CampaignDetailClientProps) {
                       {o.orderId}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-xs">{o.orderEventAtIso}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap tabular-nums">
+                    {formatDateTimeKabul(o.campaignAttributedAtIso)}
+                  </TableCell>
+                  <TableCell className="text-xs whitespace-nowrap tabular-nums">
+                    {formatDateTimeKabul(o.orderEventAtIso)}
+                  </TableCell>
                   <TableCell className="text-xs uppercase">{o.path}</TableCell>
                   <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
                     {o.buyerLatestCtwaSendAtIso ?? "—"}

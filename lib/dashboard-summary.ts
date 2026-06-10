@@ -1,7 +1,12 @@
 import { and, count, eq, gte, sql } from "drizzle-orm";
 
 import { contacts, orders } from "@/drizzle/schema";
+import { sumBusinessExpensesUsd } from "@/lib/business-expenses-list";
 import { db } from "@/lib/db";
+import {
+  currentMonthPeriodKabul,
+} from "@/lib/finance-summary";
+import { sumPayrollUsd } from "@/lib/payroll-list";
 import { APP_CURRENCY } from "@/lib/validations/order";
 
 export type DashboardSummary = {
@@ -12,12 +17,17 @@ export type DashboardSummary = {
   pendingCapiCount: number;
   ordersLast7Days: number;
   revenueLast7DaysPrimary: string;
+  /** MTD overhead (business_expenses) in APP_CURRENCY. */
+  mtdExpensesUsd: string;
+  /** MTD payroll in APP_CURRENCY. */
+  mtdPayrollUsd: string;
 };
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const since7d = new Date();
   since7d.setUTCDate(since7d.getUTCDate() - 7);
   since7d.setUTCHours(0, 0, 0, 0);
+  const mtd = currentMonthPeriodKabul();
 
   const [
     [orderCountRow],
@@ -26,6 +36,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     [contactsRow],
     [recentCountRow],
     [recentRevRow],
+    mtdExpensesUsd,
+    mtdPayrollUsd,
   ] = await Promise.all([
     db.select({ c: count() }).from(orders),
     db
@@ -48,6 +60,14 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       .where(
         and(eq(orders.currency, APP_CURRENCY), gte(orders.orderEventAt, since7d)),
       ),
+    sumBusinessExpensesUsd({
+      sinceDate: mtd.sinceDate,
+      untilDate: mtd.untilDate,
+    }),
+    sumPayrollUsd({
+      sinceDate: mtd.sinceDate,
+      untilDate: mtd.untilDate,
+    }),
   ]);
 
   return {
@@ -57,5 +77,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     pendingCapiCount: Number(pendingRow?.c ?? 0),
     ordersLast7Days: Number(recentCountRow?.c ?? 0),
     revenueLast7DaysPrimary: recentRevRow?.s ?? "0",
+    mtdExpensesUsd,
+    mtdPayrollUsd,
   };
 }

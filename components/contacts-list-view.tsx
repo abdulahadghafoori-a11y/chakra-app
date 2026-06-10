@@ -15,10 +15,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ContactSourceBadge } from "@/components/contact-source-badge";
 import type { ContactListRow } from "@/lib/contacts-list";
 import { formatDateTimeKabul } from "@/lib/kabul-time";
-import { getPhonePresentation } from "@/lib/phone-display";
+import { isOfflinePlaceholderPhone } from "@/lib/offline-contact-phone";
+import { formatStoredContactPhone } from "@/lib/phone-display";
 import { cn } from "@/lib/utils";
+
+function newOrderHrefForContact(row: ContactListRow): string {
+  if (isOfflinePlaceholderPhone(row.phoneNumber)) {
+    return `/orders/new?contactId=${encodeURIComponent(row.id)}`;
+  }
+  return `/orders/new?phone=${encodeURIComponent(row.phoneNumber)}`;
+}
 
 type Props = {
   rows: ContactListRow[];
@@ -33,7 +42,7 @@ function ContactCard({
   row: ContactListRow;
   rank: number;
 }) {
-  const phone = getPhonePresentation(row.phoneNumber);
+  const phoneDisplay = formatStoredContactPhone(row.phoneNumber);
   const lifetime = Number.parseFloat(row.lifetimeValue ?? "0").toFixed(2);
 
   return (
@@ -41,14 +50,17 @@ function ContactCard({
       <CardHeader className="border-b px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
-            <p className="text-muted-foreground text-xs tabular-nums">#{rank}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-muted-foreground text-xs tabular-nums">#{rank}</p>
+              <ContactSourceBadge source={row.source} />
+            </div>
             <p className="truncate font-medium leading-snug">
               {row.name?.trim() || (
                 <span className="text-muted-foreground">No name</span>
               )}
             </p>
             <p className="text-muted-foreground font-mono text-xs break-all">
-              {phone.formattedInternational}
+              {phoneDisplay}
             </p>
           </div>
           <p className="text-muted-foreground shrink-0 text-right text-xs">
@@ -78,7 +90,7 @@ function ContactCard({
       </CardContent>
       <CardFooter className="flex gap-2 border-t px-4 py-3">
         <Link
-          href={`/orders/new?phone=${encodeURIComponent(row.phoneNumber)}`}
+          href={newOrderHrefForContact(row)}
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
             "min-h-11 flex-1 no-underline",
@@ -131,6 +143,9 @@ export function ContactsListView({ rows, rankOffset, emptyMessage }: Props) {
                   Contact
                 </TableHead>
                 <TableHead scope="col" className="text-center align-middle">
+                  Type
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
                   Phone
                 </TableHead>
                 <TableHead scope="col" className="text-center align-middle tabular-nums">
@@ -158,7 +173,7 @@ export function ContactsListView({ rows, rankOffset, emptyMessage }: Props) {
             </TableHeader>
             <TableBody>
               {rows.map((r, rowIndex) => {
-                const phone = getPhonePresentation(r.phoneNumber);
+                const phoneDisplay = formatStoredContactPhone(r.phoneNumber);
                 const lifetime = r.lifetimeValue ?? "0";
                 return (
                   <TableRow key={r.id}>
@@ -185,8 +200,11 @@ export function ContactsListView({ rows, rankOffset, emptyMessage }: Props) {
                         {r.countryName ?? r.countryCode ?? "—"}
                       </div>
                     </TableCell>
+                    <TableCell className="align-middle text-center">
+                      <ContactSourceBadge source={r.source} />
+                    </TableCell>
                     <TableCell className="max-w-[12rem] align-middle text-center font-mono text-xs leading-snug break-all">
-                      {phone.formattedInternational}
+                      {phoneDisplay}
                     </TableCell>
                     <TableCell className="align-middle text-center tabular-nums">
                       {r.sessionCount}
@@ -213,7 +231,7 @@ export function ContactsListView({ rows, rankOffset, emptyMessage }: Props) {
                             buttonVariants({ variant: "outline", size: "sm" }),
                             "min-h-11 shrink-0 px-3 sm:min-h-9",
                           )}
-                          href={`/orders/new?phone=${encodeURIComponent(r.phoneNumber)}`}
+                          href={newOrderHrefForContact(r)}
                         >
                           New order
                         </Link>

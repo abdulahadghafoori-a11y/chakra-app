@@ -198,24 +198,56 @@ export default async function HomePage({
             Full list and new order
           </CardContent>
         </Card>
-        {coreMode ? null : (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Overhead</CardDescription>
-              <CardTitle className="text-base font-medium">
-                <Link
-                  className="text-primary underline-offset-4 hover:underline"
-                  href="/expenses"
-                >
-                  Business expenses
-                </Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-muted-foreground text-xs">
-              Rent, utilities, and other non-order costs
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>MTD operating costs</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {moneyLabel(summary.mtdExpensesUsd)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Overhead expenses this month (Kabul).{" "}
+            <Link
+              className="text-primary underline-offset-2 hover:underline"
+              href="/expenses"
+            >
+              Expenses
+            </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>MTD payroll</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {moneyLabel(summary.mtdPayrollUsd)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            Wage payments this month (Kabul).{" "}
+            <Link
+              className="text-primary underline-offset-2 hover:underline"
+              href="/payroll"
+            >
+              Payroll
+            </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Finance</CardDescription>
+            <CardTitle className="text-base font-medium">
+              <Link
+                className="text-primary underline-offset-4 hover:underline"
+                href="/finance"
+              >
+                Overview
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            P&amp;L from orders, expenses, and payroll
+          </CardContent>
+        </Card>
       </div>
 
       <div className="space-y-3">

@@ -27,6 +27,8 @@ export type ContactListRow = {
   name: string | null;
   countryCode: string | null;
   countryName: string | null;
+  /** `whatsapp` or `offline` (in-store). */
+  source: string;
   createTime: Date;
   sessionCount: number;
   orderCount: number;
@@ -63,6 +65,7 @@ export async function listContactsWithStats(input: {
       name: contacts.name,
       countryCode: contacts.countryCode,
       countryName: contacts.countryName,
+      source: contacts.source,
       createTime: contacts.createTime,
       // Correlate to outer row — do not use ${contacts.id} here; Drizzle may emit bare "id" and break uuid/text.
       sessionCount: sql<number>`(

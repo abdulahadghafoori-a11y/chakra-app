@@ -5,7 +5,7 @@
  *   npm run meta:waba-dataset
  *   npm run meta:waba-dataset -- 1699456911242528
  *
- * Reads META_ACCESS_TOKEN + META_WHATSAPP_BUSINESS_ACCOUNT_ID from .env.local.
+ * Reads META_ACCESS_TOKEN from .env.local. Pass WABA id as CLI argument.
  * Uses META_GRAPH_VERSION (default v25.0) to match lib/meta-capi.ts.
  *
  * Strategy: GET /{waba-id}/dataset → if missing or error → POST …/dataset
@@ -65,16 +65,12 @@ async function fetchJson(method, url) {
 async function main() {
   const argv = process.argv.slice(2);
   const positional = argv.filter((a) => !a.startsWith("-"));
-  const waba =
-    positional[0]?.trim() ||
-    process.env.META_WHATSAPP_BUSINESS_ACCOUNT_ID?.trim().replace(/^=+/, "") ||
-    "";
+  const waba = positional[0]?.trim().replace(/^=+/, "") || "";
   const token = process.env.META_ACCESS_TOKEN?.trim();
 
   if (!waba || !/^\d+$/.test(waba)) {
-    console.error(
-      "Pass WABA id as argument or set META_WHATSAPP_BUSINESS_ACCOUNT_ID in .env.local (digits only).",
-    );
+    console.error("Pass WABA id as argument (digits only), e.g.:");
+    console.error("  npm run meta:waba-dataset -- 1949044442407684");
     process.exit(1);
   }
   if (!token) {
@@ -117,9 +113,22 @@ async function main() {
   }
 
   const datasetId = ids[0];
-  console.log(`\nMETA_DATASET_ID=${datasetId}`);
-  console.log(`
-Put that in .env.local, restart npm run dev (or redeploy), then retry CAPI.`);
+  console.log(`\nAdd or update an entry in META_WABA_ACCOUNTS (.env.local):`);
+  console.log(
+    JSON.stringify(
+      {
+        id: waba,
+        label: "Your label",
+        datasetId,
+        phoneNumberId: "YOUR_PHONE_NUMBER_ID",
+      },
+      null,
+      2,
+    ),
+  );
+  console.log(
+    `\nMerge into META_WABA_ACCOUNTS JSON array, set phoneNumberId from Meta WhatsApp → API Setup, then restart.`,
+  );
 
   if (ids.length > 1) {
     console.warn("Multiple ids extracted; showing all:", ids);

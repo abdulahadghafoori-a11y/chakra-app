@@ -1,7 +1,7 @@
 /**
- * `FEATURE_SET=core`: production MVP — contacts, CTWA, orders/CAPI, campaigns, catalog (no
- * expenses, Meta comments surface, or AI sales). Unset or another value (`full`): enable all staff
- * surfaces.
+ * `FEATURE_SET=core`: production MVP — contacts, CTWA, orders/CAPI, campaigns, catalog, finance
+ * (expenses, payroll, overview). Still excludes Meta comments surface and AI sales. Unset or
+ * another value (`full`): enable all staff surfaces.
  */
 
 export function isCoreFeatureSet(): boolean {
@@ -19,7 +19,6 @@ export const FULL_FEATURE_UNAVAILABLE =
 export function isPathRestrictedInCoreMode(pathname: string): boolean {
   if (!isCoreFeatureSet()) return false;
 
-  if (pathname.startsWith("/expenses")) return true;
   if (pathname.startsWith("/meta-engagement")) return true;
 
   if (pathname.startsWith("/sales/login")) return false;

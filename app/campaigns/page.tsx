@@ -53,7 +53,7 @@ export default async function CampaignsPage({
       pnlFractions,
     ),
     getUnattributedOrderTotals(parsed.sinceIso, parsed.untilIso),
-    getUnlinkedCtwaOrderTotals(parsed.sinceIso, parsed.untilIso),
+    getUnlinkedCtwaOrderTotals(parsed.sinceDay, parsed.untilDay),
   ]);
 
   const filteredPerformance = filterCampaignPerformance(

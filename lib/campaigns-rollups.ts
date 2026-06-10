@@ -13,6 +13,11 @@ import {
   orders,
   ctwaSessions,
 } from "@/drizzle/schema";
+import {
+  ctwaSendTimeInKabulDayRange,
+  ordersCampaignAttributedInKabulDayRange,
+  sqlOrdersCampaignAttributedKabulDay,
+} from "@/lib/campaign-attribution-sql";
 import { db } from "@/lib/db";
 import { getCampaignThresholds } from "@/lib/campaign-thresholds";
 import { metaQualityRankingToScore0to1 } from "@/lib/meta-insights-quality";
@@ -45,17 +50,14 @@ function num(s: string | null | undefined): number {
 
 /** Revenue and order count by campaign for orders in the date window (UTC). */
 export async function rollupRevenueByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<
   Map<
     string,
     { campaignName: string | null; revenue: number; ordersCount: number }
   >
 > {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const ctwaRows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
@@ -67,7 +69,7 @@ export async function rollupRevenueByCampaign(
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
     .innerJoin(metaCampaigns, eq(metaAds.metaCampaignId, metaCampaigns.id))
-    .where(and(gte(orders.orderEventAt, since), lte(orders.orderEventAt, until)))
+    .where(ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay))
     .groupBy(metaAds.metaCampaignId, metaCampaigns.name);
 
   const manualRows = await db
@@ -86,8 +88,7 @@ export async function rollupRevenueByCampaign(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaCampaigns.id, metaCampaigns.name);
@@ -153,8 +154,8 @@ export async function rollupSpendByCampaign(
  * CTWA sessions attributed to a Meta ad and campaign in the UTC window.
  */
 export async function rollupCtwaSessionsByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, number>> {
   const rows = await db
     .select({
@@ -163,12 +164,7 @@ export async function rollupCtwaSessionsByCampaign(
     })
     .from(ctwaSessions)
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
-    .where(
-      and(
-        gte(ctwaSessions.sendTime, new Date(sinceIso)),
-        lte(ctwaSessions.sendTime, new Date(untilIso)),
-      ),
-    )
+    .where(ctwaSendTimeInKabulDayRange(sinceDay, untilDay))
     .groupBy(metaAds.metaCampaignId);
 
   const m = new Map<string, number>();
@@ -181,11 +177,9 @@ export async function rollupCtwaSessionsByCampaign(
 /** CTWA sessions in the window, grouped by Meta ad within one campaign. */
 export async function rollupCtwaSessionsByAdForCampaign(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, number>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
   const rows = await db
     .select({
       metaAdId: ctwaSessions.metaAdId,
@@ -197,8 +191,7 @@ export async function rollupCtwaSessionsByAdForCampaign(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
         isNotNull(ctwaSessions.metaAdId),
-        gte(ctwaSessions.sendTime, since),
-        lte(ctwaSessions.sendTime, until),
+        ctwaSendTimeInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(ctwaSessions.metaAdId);
@@ -228,12 +221,9 @@ export type AdAttributedOrderAgg = {
 
 export async function rollupAttributedOrdersAggByAdForCampaign(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, AdAttributedOrderAgg>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const rows = await db
     .select({
       metaAdId: metaAds.id,
@@ -264,8 +254,7 @@ export async function rollupAttributedOrdersAggByAdForCampaign(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
         isNotNull(ctwaSessions.metaAdId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaAds.id);
@@ -292,8 +281,8 @@ export async function rollupAttributedOrdersAggByAdForCampaign(
 
 export async function rollupLineCogsByAdForCampaign(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<
   Map<
     string,
@@ -304,9 +293,6 @@ export async function rollupLineCogsByAdForCampaign(
     }
   >
 > {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const rows = await db
     .select({
       metaAdId: metaAds.id,
@@ -325,8 +311,7 @@ export async function rollupLineCogsByAdForCampaign(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
         isNotNull(ctwaSessions.metaAdId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaAds.id);
@@ -347,12 +332,9 @@ export async function rollupLineCogsByAdForCampaign(
 
 export async function rollupPaidOperationalCostsByAdForCampaign(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, number>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const feeRows = await db
     .select({
       metaAdId: metaAds.id,
@@ -365,8 +347,7 @@ export async function rollupPaidOperationalCostsByAdForCampaign(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
         isNotNull(ctwaSessions.metaAdId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaAds.id);
@@ -424,12 +405,9 @@ export async function rollupAdInsightsDeliveryByCampaign(
  * (used as delivery deduction in net profit).
  */
 export async function rollupPaidOperationalCostsByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, number>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const feeRows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
@@ -438,7 +416,7 @@ export async function rollupPaidOperationalCostsByCampaign(
     .from(orders)
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
-    .where(and(gte(orders.orderEventAt, since), lte(orders.orderEventAt, until)))
+    .where(ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay))
     .groupBy(metaAds.metaCampaignId);
 
   const manualFeeRows = await db
@@ -455,8 +433,7 @@ export async function rollupPaidOperationalCostsByCampaign(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaCampaigns.id);
@@ -522,12 +499,9 @@ function mergeOrderAggMaps(
 }
 
 export async function rollupAttributedOrdersAggByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, OrderAggRow>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const ctwaRows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
@@ -556,7 +530,7 @@ export async function rollupAttributedOrdersAggByCampaign(
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
     .innerJoin(metaCampaigns, eq(metaAds.metaCampaignId, metaCampaigns.id))
-    .where(and(gte(orders.orderEventAt, since), lte(orders.orderEventAt, until)))
+    .where(ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay))
     .groupBy(metaAds.metaCampaignId, metaCampaigns.name);
 
   const manualRows = await db
@@ -592,8 +566,7 @@ export async function rollupAttributedOrdersAggByCampaign(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaCampaigns.id, metaCampaigns.name);
@@ -643,8 +616,8 @@ export async function rollupAttributedOrdersAggByCampaign(
 
 /** Sum COGS snapshots on line items for attributed orders in the window. */
 export async function rollupLineCogsByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<
   Map<
     string,
@@ -655,9 +628,6 @@ export async function rollupLineCogsByCampaign(
     }
   >
 > {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const rows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
@@ -672,7 +642,7 @@ export async function rollupLineCogsByCampaign(
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
-    .where(and(gte(orders.orderEventAt, since), lte(orders.orderEventAt, until)))
+    .where(ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay))
     .groupBy(metaAds.metaCampaignId);
 
   const manualRows = await db
@@ -695,8 +665,7 @@ export async function rollupLineCogsByCampaign(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
     .groupBy(metaCampaigns.id);
@@ -958,12 +927,10 @@ export async function rollupConvertedEconomyByCampaignByDayCtwa(
   sinceDay: string,
   untilDay: string,
 ): Promise<Map<string, Map<string, DayEconomy>>> {
-  const since = new Date(`${sinceDay}T00:00:00.000Z`);
-  const until = new Date(`${untilDay}T23:59:59.999Z`);
   const rows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
-      day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
+      day: sqlOrdersCampaignAttributedKabulDay,
       ordersCount: sqlCampaignTotalDistinctOrdersCount,
       convertedRevenue: sqlCampaignConvertedRevenueSum,
       convertedCogs:
@@ -974,11 +941,8 @@ export async function rollupConvertedEconomyByCampaignByDayCtwa(
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
-    .where(and(gte(orders.orderEventAt, since), lte(orders.orderEventAt, until)))
-    .groupBy(
-      metaAds.metaCampaignId,
-      sql`((${orders.orderEventAt} at time zone 'utc')::date)`,
-    );
+    .where(ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay))
+    .groupBy(metaAds.metaCampaignId, sqlOrdersCampaignAttributedKabulDay);
 
   const m = new Map<string, Map<string, DayEconomy>>();
   for (const r of rows) {
@@ -1001,12 +965,10 @@ export async function rollupConvertedEconomyByCampaignByDayManual(
   sinceDay: string,
   untilDay: string,
 ): Promise<Map<string, Map<string, DayEconomy>>> {
-  const since = new Date(`${sinceDay}T00:00:00.000Z`);
-  const until = new Date(`${untilDay}T23:59:59.999Z`);
   const rows = await db
     .select({
       metaCampaignId: metaCampaigns.id,
-      day: sql<string>`((${orders.orderEventAt} at time zone 'utc')::date)::text`,
+      day: sqlOrdersCampaignAttributedKabulDay,
       ordersCount: sqlCampaignTotalDistinctOrdersCount,
       convertedRevenue: sqlCampaignConvertedRevenueSum,
       convertedCogs:
@@ -1023,14 +985,10 @@ export async function rollupConvertedEconomyByCampaignByDayManual(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     )
-    .groupBy(
-      metaCampaigns.id,
-      sql`((${orders.orderEventAt} at time zone 'utc')::date)`,
-    );
+    .groupBy(metaCampaigns.id, sqlOrdersCampaignAttributedKabulDay);
 
   const m = new Map<string, Map<string, DayEconomy>>();
   for (const r of rows) {
@@ -1103,11 +1061,9 @@ export async function computeDailyNetProfitCvByCampaign(
 type LagPartial = { avg: number; n: number };
 
 async function rollupAvgOrderToConfirmLagByCampaignCtwa(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, LagPartial>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
   const rows = await db
     .select({
       metaCampaignId: metaAds.metaCampaignId,
@@ -1119,8 +1075,7 @@ async function rollupAvgOrderToConfirmLagByCampaignCtwa(
     .innerJoin(metaAds, eq(ctwaSessions.metaAdId, metaAds.id))
     .where(
       and(
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
         inArray(orders.status, [...CAMPAIGN_CONVERTED_ORDER_STATUSES]),
       ),
     )
@@ -1137,11 +1092,9 @@ async function rollupAvgOrderToConfirmLagByCampaignCtwa(
 }
 
 async function rollupAvgOrderToConfirmLagByCampaignManual(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, LagPartial>> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
   const rows = await db
     .select({
       metaCampaignId: metaCampaigns.id,
@@ -1157,8 +1110,7 @@ async function rollupAvgOrderToConfirmLagByCampaignManual(
       and(
         isNull(orders.ctwaSessionId),
         isNotNull(orders.manualMetaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
         inArray(orders.status, [...CAMPAIGN_CONVERTED_ORDER_STATUSES]),
       ),
     )
@@ -1176,16 +1128,16 @@ async function rollupAvgOrderToConfirmLagByCampaignManual(
 
 /** Mean days from order `order_event_at` to `updated_at` for converted statuses (proxy for confirmation delay). */
 export async function rollupAvgOrderToConfirmLagByCampaign(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<Map<string, number>> {
   const ctwa = await rollupAvgOrderToConfirmLagByCampaignCtwa(
-    sinceIso,
-    untilIso,
+    sinceDay,
+    untilDay,
   );
   const manual = await rollupAvgOrderToConfirmLagByCampaignManual(
-    sinceIso,
-    untilIso,
+    sinceDay,
+    untilDay,
   );
   const agg = new Map<string, { sum: number; n: number }>();
   for (const [id, { avg, n }] of ctwa) {
@@ -1508,8 +1460,8 @@ export async function getUnattributedOrderTotals(
 
 /** Orders with CTWA but ad not linked (attribution gap). */
 export async function getUnlinkedCtwaOrderTotals(
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<{ ordersCount: number; revenue: number }> {
   const [row] = await db
     .select({
@@ -1520,8 +1472,7 @@ export async function getUnlinkedCtwaOrderTotals(
     .innerJoin(ctwaSessions, eq(orders.ctwaSessionId, ctwaSessions.id))
     .where(
       and(
-        gte(orders.orderEventAt, new Date(sinceIso)),
-        lte(orders.orderEventAt, new Date(untilIso)),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
         isNull(ctwaSessions.metaAdId),
       ),
     );
@@ -1565,17 +1516,20 @@ export async function getCampaignPerformanceRollups(
     metaEngagementByCampaign,
   ] = await Promise.all([
     rollupSpendByCampaign(sinceDay, untilDay),
-    rollupCtwaSessionsByCampaign(sinceIso, untilIso),
-    rollupAttributedOrdersAggByCampaign(sinceIso, untilIso),
-    rollupLineCogsByCampaign(sinceIso, untilIso),
-    rollupPaidOperationalCostsByCampaign(sinceIso, untilIso),
+    rollupCtwaSessionsByCampaign(sinceDay, untilDay),
+    rollupAttributedOrdersAggByCampaign(sinceDay, untilDay),
+    rollupLineCogsByCampaign(sinceDay, untilDay),
+    rollupPaidOperationalCostsByCampaign(sinceDay, untilDay),
     rollupAdInsightsDeliveryByCampaign(sinceDay, untilDay),
     rollupMetaAttributedActionsByCampaign(sinceDay, untilDay),
     getUnattributedOrderTotals(sinceIso, untilIso),
     loadMetaCampaignLookup(),
     computeDailyNetProfitCvByCampaign(cvSinceDay, untilDay, pnl),
-    rollupAvgOrderToConfirmLagByCampaign(sinceIso, untilIso),
-    rollupAvgOrderToConfirmLagByCampaign(baselineSinceIso, baselineUntilIso),
+    rollupAvgOrderToConfirmLagByCampaign(sinceDay, untilDay),
+    rollupAvgOrderToConfirmLagByCampaign(
+      baselineSinceDay,
+      baselineUntilDay,
+    ),
     rollupCampaignMetaEngagementSignals(untilDay, thresholds.minQualityRankScore),
   ]);
 

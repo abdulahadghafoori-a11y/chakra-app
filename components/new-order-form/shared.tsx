@@ -32,6 +32,12 @@ export function CtwaSessionAttributionFooter({
   return (
     <>
       <p className="text-muted-foreground text-xs">
+        Campaign lead day (Kabul):{" "}
+        <span className="text-foreground font-medium tabular-nums">
+          {formatDateTimeKabul(session.sendTime)}
+        </span>
+      </p>
+      <p className="text-muted-foreground text-xs">
         Campaign:{" "}
         <span className="text-foreground font-medium">
           {session.campaignName?.trim() || "— (not linked to a synced campaign)"}

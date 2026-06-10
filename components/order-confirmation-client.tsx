@@ -18,7 +18,8 @@ import {
   type OrderConfirmClientPayload,
   orderConfirmStorageKey,
 } from "@/lib/order-confirmation-storage";
-import { getPhonePresentation } from "@/lib/phone-display";
+import { OrderSalesChannelBadge } from "@/components/contact-source-badge";
+import { formatStoredContactPhone } from "@/lib/phone-display";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -47,7 +48,10 @@ export function OrderConfirmationClient({ orderId, data }: Props) {
   }, [orderId]);
 
   const { order, contact, lines } = data;
-  const presentation = getPhonePresentation(contact.phoneNumber);
+  const salesChannel =
+    "salesChannel" in order && typeof order.salesChannel === "string"
+      ? order.salesChannel
+      : "online";
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 sm:space-y-6">
@@ -74,10 +78,14 @@ export function OrderConfirmationClient({ orderId, data }: Props) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">Order</CardTitle>
-          <CardDescription>
-            Status <Badge variant="secondary">{order.status}</Badge>
-            {" · "}
-            {order.currency} {Number(order.value).toFixed(2)}
+          <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              Status <Badge variant="secondary">{order.status}</Badge>
+            </span>
+            <OrderSalesChannelBadge channel={salesChannel} />
+            <span>
+              {order.currency} {Number(order.value).toFixed(2)}
+            </span>
             {order.valueAfn != null && order.valueAfn.trim() !== "" ? (
               <>
                 {" · "}
@@ -127,7 +135,9 @@ export function OrderConfirmationClient({ orderId, data }: Props) {
               </div>
               <div>
                 <dt className="text-muted-foreground">Phone</dt>
-                <dd className="font-mono">{presentation.formattedInternational}</dd>
+                <dd className="font-mono">
+                  {formatStoredContactPhone(contact.phoneNumber)}
+                </dd>
               </div>
             </dl>
           </div>

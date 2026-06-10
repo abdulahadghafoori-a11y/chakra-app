@@ -1,7 +1,9 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { contacts } from "@/drizzle/schema";
+import { countryFromPhoneDigits } from "@/lib/contact-phone";
 import { db } from "@/lib/db";
+import { allocateOfflinePlaceholderPhone } from "@/lib/offline-contact-phone";
 
 export type UpsertContactInput = {
   /** International digits only (WhatsApp `wa_id`); unique key (`contacts.phone_number`). */
@@ -33,6 +35,7 @@ export async function upsertContactByPhone(
       countryCode: countryCode || null,
       countryName: countryName || null,
       createTime: input.createTime,
+      source: "whatsapp",
     })
     .onConflictDoUpdate({
       target: contacts.phoneNumber,
@@ -46,6 +49,7 @@ export async function upsertContactByPhone(
         countryCode: sql`COALESCE(EXCLUDED.country_code, ${contacts.countryCode})`,
         countryName: sql`COALESCE(EXCLUDED.country_name, ${contacts.countryName})`,
         createTime: sql`LEAST(${contacts.createTime}, EXCLUDED.create_time)`,
+        source: "whatsapp",
       },
     })
     .returning({ id: contacts.id });
@@ -54,4 +58,52 @@ export async function upsertContactByPhone(
     throw new Error("upsertContactByPhone: no row returned");
   }
   return row;
+}
+
+export type CreateOfflineContactInput = {
+  /** International digits; omit when the customer did not provide a number. */
+  phoneNumber?: string | null;
+  name?: string | null;
+  createTime?: Date;
+};
+
+/**
+ * In-store customer without a WhatsApp thread. Idempotent on phone when a number is given.
+ */
+export async function createOfflineContactByPhone(
+  input: CreateOfflineContactInput,
+): Promise<{ id: string; created: boolean }> {
+  const digits = input.phoneNumber?.replace(/\D/g, "") ?? "";
+  const phoneNumber =
+    digits.length > 0 ? digits : allocateOfflinePlaceholderPhone();
+  const name = input.name?.trim() || null;
+  const createTime = input.createTime ?? new Date();
+  const { countryCode, countryName } = countryFromPhoneDigits(phoneNumber);
+
+  const [existing] = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.phoneNumber, phoneNumber))
+    .limit(1);
+
+  if (existing) {
+    return { id: existing.id, created: false };
+  }
+
+  const [row] = await db
+    .insert(contacts)
+    .values({
+      phoneNumber,
+      name,
+      countryCode: digits.length > 0 ? countryCode : null,
+      countryName: digits.length > 0 ? countryName : null,
+      createTime,
+      source: "offline",
+    })
+    .returning({ id: contacts.id });
+
+  if (!row) {
+    throw new Error("createOfflineContactByPhone: no row returned");
+  }
+  return { id: row.id, created: true };
 }

@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 import { AFGHANISTAN_OUTSIDE_KABUL_PROVINCE_SET } from "@/lib/afghanistan-provinces";
+import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 import { kabulDateTimeLocalToDate } from "@/lib/kabul-time";
+import { ORDER_SALES_CHANNELS } from "@/lib/sales-channel";
 
 export const orderStatuses = [
   "pending",
@@ -23,6 +25,34 @@ export function orderStatusEligibleForPurchaseCapi(status: string): boolean {
     status === "confirmed" || status === "paid" || status === "shipped"
   );
 }
+
+/** Line unit prices may be edited until the order is paid or closed out. */
+export function orderAllowsLinePriceEdit(status: string): boolean {
+  return (
+    status !== "paid" && status !== "cancelled" && status !== "returned"
+  );
+}
+
+const updateOrderLinePricesLineSchema = z.object({
+  lineIndex: z.number().int().min(0),
+  unitSalePrice: z
+    .number()
+    .positive()
+    .refine(
+      Number.isInteger,
+      "Each unit price in AFN must be a whole number (no decimals).",
+    ),
+  quantity: z.number().int().min(1).max(99_999),
+});
+
+export const updateOrderLinePricesSchema = z.object({
+  orderId: z.string().min(1),
+  lines: z.array(updateOrderLinePricesLineSchema).min(1).max(50),
+});
+
+export type UpdateOrderLinePricesInput = z.infer<
+  typeof updateOrderLinePricesSchema
+>;
 
 const ctwaSessionIdField = z.union([
   z.string().uuid(),
@@ -71,9 +101,47 @@ const orderDeliveryCostField = z
 
 const manualMetaCampaignIdField = z.union([z.string().min(1), z.literal("")]);
 
+/** Meta WABA id from staff picker (`META_WABA_ACCOUNTS`) when CTWA cannot supply one. */
+const capiWabaIdField = z.union([
+  z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "Invalid WhatsApp business account id"),
+  z.literal(""),
+]);
+
+/**
+ * Campaign lead instant (Kabul wall clock) for manual attribution when there is no CTWA session.
+ * Same format as {@link capiEventTimeKabulField} (`datetime-local`, Asia/Kabul).
+ */
+export const manualCampaignAttributedAtKabulField = z.union([
+  z
+    .string()
+    .min(1, "Set the campaign attribution date and time (Kabul)")
+    .refine(
+      (s) => {
+        try {
+          kabulDateTimeLocalToDate(s);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: "Invalid date and time" },
+    ),
+  z.literal(""),
+]);
+
 const createOrderObjectSchema = z.object({
-  phone: z.string().min(6),
+  /** Required for online orders; optional for in-store. */
+  phone: z.string(),
+  /** `offline` = in-store; no Meta CAPI and excluded from campaign rollups. */
+  salesChannel: z.enum(ORDER_SALES_CHANNELS),
+  /** Optional display name when registering an in-store customer by phone. */
+  offlineContactName: z.string().max(120).optional(),
   ctwaSessionId: ctwaSessionIdField,
+  /** Required server-side when no CTWA click id; validated in createOrder. */
+  capiWabaId: capiWabaIdField,
   lines: z.array(orderLineSchema).min(1).max(50),
   orderId: z.string().optional(),
   status: z.enum(orderStatuses),
@@ -84,6 +152,8 @@ const createOrderObjectSchema = z.object({
    * Does not gate Meta Purchase CAPI (sent with phone / WABA even without `ctwa_clid`).
    */
   manualMetaCampaignId: manualMetaCampaignIdField,
+  /** Lead instant for campaign P&amp;L when attributing via manual campaign (no CTWA session). */
+  manualCampaignAttributedAtKabul: manualCampaignAttributedAtKabulField,
   /** Inter-provincial shipment within Afghanistan — requires province. */
   interProvinceAfghanistanDelivery: z.boolean(),
   deliveryProvinceAfghanistan: z.string().max(80),
@@ -122,15 +192,111 @@ function refineInterProvinceAfghanistanDelivery(
   }
 }
 
-export const createOrderSchema = createOrderObjectSchema.superRefine(
-  refineInterProvinceAfghanistanDelivery,
-);
+function refineManualCampaignAttributionDate(
+  data: Pick<
+    z.infer<typeof createOrderObjectSchema>,
+    | "salesChannel"
+    | "ctwaSessionId"
+    | "manualMetaCampaignId"
+    | "manualCampaignAttributedAtKabul"
+  >,
+  ctx: z.RefinementCtx,
+) {
+  if (data.salesChannel === "offline") return;
+
+  const hasCtwa = (data.ctwaSessionId?.trim() ?? "").length > 0;
+  const manualId = data.manualMetaCampaignId?.trim() ?? "";
+  if (!hasCtwa && manualId && !data.manualCampaignAttributedAtKabul?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Set the campaign attribution date and time (Kabul) when attributing to a manual campaign.",
+      path: ["manualCampaignAttributedAtKabul"],
+    });
+  }
+}
+
+function refineOnlinePhoneRequired(
+  data: Pick<z.infer<typeof createOrderObjectSchema>, "salesChannel" | "phone">,
+  ctx: z.RefinementCtx,
+) {
+  if (data.salesChannel === "offline") {
+    const trimmed = data.phone.trim();
+    if (trimmed && !contactPhoneKeyFromRaw(trimmed)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter a valid phone number (with country code), or leave blank.",
+        path: ["phone"],
+      });
+    }
+    return;
+  }
+  if (!contactPhoneKeyFromRaw(data.phone)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Enter a valid phone number (with country code).",
+      path: ["phone"],
+    });
+  }
+}
+
+function refineOfflineOrderChannel(
+  data: Pick<
+    z.infer<typeof createOrderObjectSchema>,
+    | "salesChannel"
+    | "ctwaSessionId"
+    | "capiWabaId"
+    | "manualMetaCampaignId"
+    | "manualCampaignAttributedAtKabul"
+  >,
+  ctx: z.RefinementCtx,
+) {
+  if (data.salesChannel !== "offline") return;
+
+  if ((data.capiWabaId?.trim() ?? "").length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "In-store orders do not use WhatsApp business line selection.",
+      path: ["capiWabaId"],
+    });
+  }
+  if ((data.ctwaSessionId?.trim() ?? "").length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "In-store orders cannot use a CTWA session.",
+      path: ["ctwaSessionId"],
+    });
+  }
+  if ((data.manualMetaCampaignId?.trim() ?? "").length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "In-store orders are not counted in Campaigns.",
+      path: ["manualMetaCampaignId"],
+    });
+  }
+  if ((data.manualCampaignAttributedAtKabul?.trim() ?? "").length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "In-store orders are not counted in Campaigns.",
+      path: ["manualCampaignAttributedAtKabul"],
+    });
+  }
+}
+
+export const createOrderSchema = createOrderObjectSchema
+  .superRefine(refineInterProvinceAfghanistanDelivery)
+  .superRefine(refineOnlinePhoneRequired)
+  .superRefine(refineOfflineOrderChannel)
+  .superRefine(refineManualCampaignAttributionDate);
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 export const newOrderFormSchema = createOrderObjectSchema
   .omit({ orderId: true })
-  .superRefine(refineInterProvinceAfghanistanDelivery);
+  .superRefine(refineInterProvinceAfghanistanDelivery)
+  .superRefine(refineOnlinePhoneRequired)
+  .superRefine(refineOfflineOrderChannel)
+  .superRefine(refineManualCampaignAttributionDate);
 
 export type NewOrderFormInput = z.infer<typeof newOrderFormSchema>;
 
@@ -138,6 +304,8 @@ export const linkOrderManualCampaignSchema = z.object({
   orderId: z.string().min(1),
   /** Empty string clears manual attribution. */
   metaCampaignId: z.union([z.string().min(1), z.literal("")]),
+  /** Lead instant (Kabul) when setting manual campaign; ignored when clearing. */
+  manualCampaignAttributedAtKabul: manualCampaignAttributedAtKabulField.optional(),
 });
 
 export type LinkOrderManualCampaignInput = z.infer<

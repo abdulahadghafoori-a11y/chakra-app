@@ -17,6 +17,7 @@ import {
   resolveMetaPurchaseCapiPath,
   type MetaPurchaseCapiPath,
 } from "@/lib/meta-capi-shared";
+import { resolveMetaDatasetIdForWaba } from "@/lib/whatsapp-waba-registry";
 import {
   hashCountryForMeta,
   hashExternalIdForMeta,
@@ -53,10 +54,7 @@ export type MetaPurchaseParams = {
   lines: MetaPurchaseLineItem[];
   /** CTWA click id — omitted from user_data when null/empty. */
   ctwaClid: string | null;
-  /**
-   * Meta WABA from the CTWA session (`entry.id` from webhooks). Falls back to
-   * `META_WHATSAPP_BUSINESS_ACCOUNT_ID` when null/empty.
-   */
+  /** Meta WABA id — required for dataset routing (`META_WABA_ACCOUNTS`). */
   whatsappBusinessAccountId: string | null;
   /** Digits-only phone (same normalization as hashing). */
   phoneDigits: string;
@@ -100,11 +98,14 @@ export function metaPurchaseResendEventId(orderId: string): string {
   return hashExternalIdForMeta(candidate);
 }
 
-function resolveWabaId(params: MetaPurchaseParams): string {
-  return (
-    normalizeMetaEnvId(params.whatsappBusinessAccountId ?? undefined) ||
-    normalizeMetaEnvId(process.env.META_WHATSAPP_BUSINESS_ACCOUNT_ID)
-  );
+function requireWabaId(params: MetaPurchaseParams): string {
+  const id = normalizeMetaEnvId(params.whatsappBusinessAccountId ?? undefined);
+  if (!id) {
+    throw new Error(
+      "WhatsApp business account id is required for Meta CAPI (set on the order or CTWA session).",
+    );
+  }
+  return id;
 }
 
 /**
@@ -142,7 +143,7 @@ export function buildMetaPurchasePayload(
           externalIdHash,
           countryHash,
           ctwaClid: clid,
-          wabaId: resolveWabaId(params) || null,
+          wabaId: requireWabaId(params),
         })
       : buildStandardCapiUserData({
           phHash,
@@ -217,15 +218,12 @@ export async function sendMetaPurchaseEvent(
   params: MetaPurchaseParams,
   options?: SendMetaPurchaseEventOptions,
 ): Promise<MetaPurchaseResult> {
-  const datasetId =
-    normalizeMetaEnvId(process.env.META_DATASET_ID) ||
-    normalizeMetaEnvId(process.env.META_PIXEL_ID);
+  const wabaId = requireWabaId(params);
+  const datasetId = resolveMetaDatasetIdForWaba(wabaId);
   const accessToken = process.env.META_ACCESS_TOKEN?.trim();
 
-  if (!datasetId || !accessToken) {
-    throw new Error(
-      "META_DATASET_ID (Events Manager dataset id) and META_ACCESS_TOKEN must be set",
-    );
+  if (!accessToken) {
+    throw new Error("META_ACCESS_TOKEN must be set for Meta CAPI.");
   }
 
   if (!isProductionNodeEnv()) {
@@ -288,8 +286,8 @@ export async function sendMetaPurchaseEvent(
     }
     throw new Error(
       trace
-        ? `Meta accepted the request but reported events_received=0 (fbtrace_id ${trace}). Check META_DATASET_ID and Events Manager Test vs Live.`
-        : "Meta accepted the request but reported events_received=0. Check META_DATASET_ID and Events Manager Test vs Live.",
+        ? `Meta accepted the request but reported events_received=0 (fbtrace_id ${trace}). Check META_WABA_ACCOUNTS dataset ids and Events Manager Test vs Live.`
+        : "Meta accepted the request but reported events_received=0. Check META_WABA_ACCOUNTS dataset ids and Events Manager Test vs Live.",
     );
   }
 

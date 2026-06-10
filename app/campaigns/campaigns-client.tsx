@@ -463,7 +463,7 @@ export function CampaignsClient({
             <CardTitle>Campaign decisions (COD)</CardTitle>
             <CardDescription>
               Campaigns with spend, CTWA, attributed orders, or synced Meta Insights
-              in this UTC window — <strong>ACTIVE</strong> and{" "}
+              in this window — <strong>ACTIVE</strong> and{" "}
               <strong>inactive</strong> (Meta{" "}
               <code className="bg-muted rounded px-1">effective_status</code>).{" "}
               <strong>
@@ -475,8 +475,11 @@ export function CampaignsClient({
               <strong>delivery cost (per-order)</strong>, and{" "}
               <strong>net profit</strong> (money in <strong>{APP_CURRENCY}</strong>
               ). Ads Insights messaging and purchase counts are <em>never</em> inputs
-              to those verdicts (orders often lack CTWA or CAPI). Range (UTC):{" "}
-              {rangeLabel}.
+              to those verdicts (orders often lack CTWA or CAPI). Order revenue
+              and counts use <strong>lead date (Kabul)</strong> — first WhatsApp
+              from the ad or your manual attribution day — aligned with ad spend
+              dates. Unattributed orders below still use <strong>sale date</strong>.
+              Range: {rangeLabel}.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-end gap-2">

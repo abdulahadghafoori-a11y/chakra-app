@@ -126,8 +126,8 @@ export async function GET(
     ),
     listAttributedOrdersForCampaign(
       campaignId,
-      parsedRange.sinceIso,
-      parsedRange.untilIso,
+      parsedRange.sinceDay,
+      parsedRange.untilDay,
       5000,
     ),
     listCampaignActivityRows(campaignId, 8000, {
@@ -135,8 +135,8 @@ export async function GET(
     }),
     getCampaignAttributionSplit(
       campaignId,
-      parsedRange.sinceIso,
-      parsedRange.untilIso,
+      parsedRange.sinceDay,
+      parsedRange.untilDay,
     ),
   ]);
 
@@ -313,6 +313,7 @@ export async function GET(
 
   const ordersHeader = [
     "order_id",
+    "campaign_attributed_at",
     "order_event_at",
     "status",
     "value_usd",
@@ -322,6 +323,7 @@ export async function GET(
   ];
   const ordersDataRows = attributedOrders.map((o) => [
     o.orderId,
+    o.campaignAttributedAt.toISOString(),
     o.orderEventAt.toISOString(),
     o.status,
     o.valueUsd,

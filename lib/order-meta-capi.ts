@@ -108,6 +108,7 @@ export async function loadOrderPurchaseCapiContext(
       id: orders.id,
       contactId: orders.contactId,
       ctwaSessionId: orders.ctwaSessionId,
+      capiWabaId: orders.capiWabaId,
       capiSent: orders.capiSent,
     })
     .from(orders)
@@ -128,10 +129,11 @@ export async function loadOrderPurchaseCapiContext(
 
   if (!contact) return null;
 
-  const { ctwaClid, wabaId } = await resolveContactCtwaForCapi(
+  const { ctwaClid, wabaId: sessionWabaId } = await resolveContactCtwaForCapi(
     orderRow.contactId,
     orderRow.ctwaSessionId,
   );
+  const wabaId = orderRow.capiWabaId?.trim() || sessionWabaId;
 
   const itemRows = await db
     .select({

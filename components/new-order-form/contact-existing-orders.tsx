@@ -28,9 +28,12 @@ function statusBadgeVariant(
 }
 
 function formatCollapsedOrderSummary(o: NewOrderContactOrderRow): string {
+  const valuePart = o.valueAfn
+    ? `${formatOrderUsdTable(o.valueUsd)} ${o.currency} · ${o.valueAfn} AFN`
+    : `${formatOrderUsdTable(o.valueUsd)} ${o.currency}`;
   const parts = [
     formatOrderStatusLabel(o.status),
-    `${formatOrderUsdTable(o.valueUsd)} ${o.currency}`,
+    valuePart,
     formatContactOrderProductsSummary(o.lines),
     formatDateTimeKabul(new Date(o.orderEventAtIso)),
   ];

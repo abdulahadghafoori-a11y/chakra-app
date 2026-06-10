@@ -25,13 +25,15 @@ const baseAuthedNavLinks: { href: string; label: string }[] = [
   { href: "/contacts", label: "Contacts" },
   { href: "/orders", label: "Orders" },
   { href: "/expenses", label: "Expenses" },
+  { href: "/payroll", label: "Payroll" },
+  { href: "/finance", label: "Finance" },
   { href: "/products", label: "Products" },
   { href: "/campaigns", label: "Campaigns" },
   { href: "/meta-engagement", label: "Meta comments" },
   { href: "/sales", label: "AI agent" },
 ];
 
-const CORE_HIDDEN_HREFS = new Set(["/expenses", "/meta-engagement", "/sales"]);
+const CORE_HIDDEN_HREFS = new Set(["/meta-engagement", "/sales"]);
 
 function navLinkClass(pathname: string, href: string) {
   const active =

@@ -471,7 +471,13 @@ export async function runSalesToolCall(
       });
 
       try {
-        await postMetaEventsPayload(payload);
+        const wabaForDataset = ctwa?.wabaId?.trim();
+        if (!wabaForDataset) {
+          throw new Error(
+            "No WhatsApp business account on this contact for Meta funnel CAPI.",
+          );
+        }
+        await postMetaEventsPayload(payload, wabaForDataset);
       } catch (e) {
         await db
           .delete(agentEvents)

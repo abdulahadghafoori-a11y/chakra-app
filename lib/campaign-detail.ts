@@ -21,6 +21,7 @@ import {
   metaMarketingActivities,
   orders,
 } from "@/drizzle/schema";
+import { ordersCampaignAttributedInKabulDayRange } from "@/lib/campaign-attribution-sql";
 import { META_MARKETING_API_ACTIVITY_EMAIL } from "@/lib/campaign-activity";
 import {
   CAMPAIGN_EXCLUDED_ORDER_STATUSES,
@@ -167,6 +168,9 @@ export type CampaignAdBreakdownRow = {
 
 export type CampaignAttributedOrderRow = {
   orderId: string;
+  /** Lead / campaign attribution day (first ad message or staff-picked). */
+  campaignAttributedAt: Date;
+  /** Sale confirmation time (CAPI / checkout). */
   orderEventAt: Date;
   status: string;
   valueUsd: string;
@@ -290,12 +294,9 @@ export function computeCampaignOperationalWarnings(
 
 export async function getCampaignAttributionSplit(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
 ): Promise<{ ctwa: AttributionSplit; manual: AttributionSplit }> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const [ctwaRow] = await db
     .select({
       ordersCount: sqlCampaignTotalOrdersCount,
@@ -308,8 +309,7 @@ export async function getCampaignAttributionSplit(
     .where(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     );
 
@@ -324,8 +324,7 @@ export async function getCampaignAttributionSplit(
       and(
         isNull(orders.ctwaSessionId),
         eq(orders.manualMetaCampaignId, metaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
       ),
     );
 
@@ -549,17 +548,17 @@ export async function getCampaignAdBreakdown(
       )
       .groupBy(adInsightsDaily.metaAdId, metaAds.name)
       .orderBy(desc(sql`coalesce(sum(${adInsightsDaily.spend}::numeric), 0)`)),
-    rollupCtwaSessionsByAdForCampaign(metaCampaignId, sinceIso, untilIso),
+    rollupCtwaSessionsByAdForCampaign(metaCampaignId, sinceDay, untilDay),
     rollupAttributedOrdersAggByAdForCampaign(
       metaCampaignId,
-      sinceIso,
-      untilIso,
+      sinceDay,
+      untilDay,
     ),
-    rollupLineCogsByAdForCampaign(metaCampaignId, sinceIso, untilIso),
+    rollupLineCogsByAdForCampaign(metaCampaignId, sinceDay, untilDay),
     rollupPaidOperationalCostsByAdForCampaign(
       metaCampaignId,
-      sinceIso,
-      untilIso,
+      sinceDay,
+      untilDay,
     ),
     rollupAdMetaEngagementSignalsForCampaign(
       metaCampaignId,
@@ -714,16 +713,14 @@ export async function getCampaignAdBreakdown(
 
 export async function listAttributedOrdersForCampaign(
   metaCampaignId: string,
-  sinceIso: string,
-  untilIso: string,
+  sinceDay: string,
+  untilDay: string,
   limit = 200,
 ): Promise<CampaignAttributedOrderRow[]> {
-  const since = new Date(sinceIso);
-  const until = new Date(untilIso);
-
   const ctwaOrders = await db
     .select({
       orderId: orders.id,
+      campaignAttributedAt: orders.campaignAttributedAt,
       orderEventAt: orders.orderEventAt,
       status: orders.status,
       value: orders.value,
@@ -736,8 +733,7 @@ export async function listAttributedOrdersForCampaign(
     .where(
       and(
         eq(metaAds.metaCampaignId, metaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
         notInArray(orders.status, [...CAMPAIGN_EXCLUDED_ORDER_STATUSES]),
       ),
     );
@@ -745,6 +741,7 @@ export async function listAttributedOrdersForCampaign(
   const manualOrders = await db
     .select({
       orderId: orders.id,
+      campaignAttributedAt: orders.campaignAttributedAt,
       orderEventAt: orders.orderEventAt,
       status: orders.status,
       value: orders.value,
@@ -755,8 +752,7 @@ export async function listAttributedOrdersForCampaign(
       and(
         isNull(orders.ctwaSessionId),
         eq(orders.manualMetaCampaignId, metaCampaignId),
-        gte(orders.orderEventAt, since),
-        lte(orders.orderEventAt, until),
+        ordersCampaignAttributedInKabulDayRange(sinceDay, untilDay),
         notInArray(orders.status, [...CAMPAIGN_EXCLUDED_ORDER_STATUSES]),
       ),
     );
@@ -786,29 +782,38 @@ export async function listAttributedOrdersForCampaign(
   }
 
   const merged: CampaignAttributedOrderRow[] = [
-    ...ctwaOrders.map((r) => ({
-      orderId: r.orderId,
-      orderEventAt: r.orderEventAt,
-      status: r.status,
-      valueUsd: r.value,
-      path: "ctwa" as const,
-      metaAdId: r.metaAdId,
-      buyerLatestCtwaSendAt:
-        latestCtwaSendByContact.get(r.contactId) ?? null,
-    })),
-    ...manualOrders.map((r) => ({
-      orderId: r.orderId,
-      orderEventAt: r.orderEventAt,
-      status: r.status,
-      valueUsd: r.value,
-      path: "manual" as const,
-      metaAdId: null as string | null,
-      buyerLatestCtwaSendAt:
-        latestCtwaSendByContact.get(r.contactId) ?? null,
-    })),
+    ...ctwaOrders
+      .filter((r) => r.campaignAttributedAt != null)
+      .map((r) => ({
+        orderId: r.orderId,
+        campaignAttributedAt: r.campaignAttributedAt!,
+        orderEventAt: r.orderEventAt,
+        status: r.status,
+        valueUsd: r.value,
+        path: "ctwa" as const,
+        metaAdId: r.metaAdId,
+        buyerLatestCtwaSendAt:
+          latestCtwaSendByContact.get(r.contactId) ?? null,
+      })),
+    ...manualOrders
+      .filter((r) => r.campaignAttributedAt != null)
+      .map((r) => ({
+        orderId: r.orderId,
+        campaignAttributedAt: r.campaignAttributedAt!,
+        orderEventAt: r.orderEventAt,
+        status: r.status,
+        valueUsd: r.value,
+        path: "manual" as const,
+        metaAdId: null as string | null,
+        buyerLatestCtwaSendAt:
+          latestCtwaSendByContact.get(r.contactId) ?? null,
+      })),
   ];
 
-  merged.sort((a, b) => b.orderEventAt.getTime() - a.orderEventAt.getTime());
+  merged.sort(
+    (a, b) =>
+      b.campaignAttributedAt.getTime() - a.campaignAttributedAt.getTime(),
+  );
   return merged.slice(0, limit);
 }
 

@@ -21,6 +21,7 @@ export type OrderTableRow = {
   id: string;
   phone: string;
   contactId: string;
+  salesChannel: string;
   status: string;
   deliveryProvinceAfghanistan: string | null;
   deliveryTrackingNumber: string | null;
@@ -133,6 +134,7 @@ function mapOrderTableRow(r: {
   id: string;
   phone: string;
   contactId: string;
+  salesChannel: string;
   status: string;
   deliveryProvinceAfghanistan: string | null;
   deliveryTrackingNumber: string | null;
@@ -151,6 +153,7 @@ function mapOrderTableRow(r: {
     id: r.id,
     phone: r.phone,
     contactId: r.contactId,
+    salesChannel: r.salesChannel,
     status: r.status,
     deliveryProvinceAfghanistan: r.deliveryProvinceAfghanistan,
     deliveryTrackingNumber: r.deliveryTrackingNumber,
@@ -348,6 +351,7 @@ export async function loadOrdersTableRows(options: {
       id: orders.id,
       phone: contacts.phoneNumber,
       contactId: contacts.id,
+      salesChannel: orders.salesChannel,
       status: orders.status,
       deliveryProvinceAfghanistan: orders.deliveryProvinceAfghanistan,
       deliveryTrackingNumber: orders.deliveryTrackingNumber,

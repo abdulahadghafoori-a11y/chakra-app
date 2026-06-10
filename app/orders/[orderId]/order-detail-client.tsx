@@ -9,6 +9,7 @@ import {
   linkOrderManualCampaign,
   prepareResendOrderPurchaseCapi,
   resendOrderPurchaseCapi,
+  updateOrderLinePrices,
   updateOrderMetadata,
   updateOrderStatus,
 } from "@/actions/order";
@@ -50,8 +51,12 @@ import { ProvinceSearchCombobox } from "@/components/province-search-combobox";
 import { AFGHANISTAN_PROVINCES_OUTSIDE_KABUL } from "@/lib/afghanistan-provinces";
 import { getDefaultKabulDateTimeLocal } from "@/lib/kabul-time";
 import type { OrderDetail } from "@/lib/order-detail";
-import { parseAfnPerOneUsdFromDb } from "@/lib/fx-afn-usd";
 import {
+  estimateAfnWholeFromStoredUsd,
+  parseAfnPerOneUsdFromDb,
+} from "@/lib/fx-afn-usd";
+import {
+  orderAllowsLinePriceEdit,
   orderStatuses,
   orderStatusEligibleForPurchaseCapi,
   type UpdateOrderStatusInput,
@@ -73,6 +78,45 @@ function money(amount: string, currency: string) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+type LineEditRow = {
+  lineIndex: number;
+  quantity: number;
+  unitSalePriceAfn: number;
+};
+
+function initialLineEdits(order: OrderDetail): LineEditRow[] {
+  return order.lines.map((l) => {
+    const fromStored =
+      l.unitSalePriceAfn != null && l.unitSalePriceAfn.trim() !== ""
+        ? Math.round(Number(l.unitSalePriceAfn))
+        : estimateAfnWholeFromStoredUsd(
+            Number(l.unitSalePrice),
+            order.afnPerUsdSnapshot,
+          );
+    return {
+      lineIndex: l.lineIndex,
+      quantity: l.quantity,
+      unitSalePriceAfn:
+        fromStored != null && Number.isFinite(fromStored) && fromStored > 0
+          ? fromStored
+          : 0,
+    };
+  });
+}
+
+function lineEditsMatchOrder(order: OrderDetail, edits: LineEditRow[]): boolean {
+  const expected = initialLineEdits(order);
+  if (edits.length !== expected.length) return false;
+  return edits.every((e, i) => {
+    const ex = expected[i]!;
+    return (
+      e.lineIndex === ex.lineIndex &&
+      e.quantity === ex.quantity &&
+      e.unitSalePriceAfn === ex.unitSalePriceAfn
+    );
+  });
 }
 
 function shippingBaseline(order: OrderDetail) {
@@ -119,6 +163,9 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
   const [shippingDeliveryCostAfn, setShippingDeliveryCostAfn] = useState(
     () => shippingBaseline(order).deliveryCost,
   );
+  const [lineEdits, setLineEdits] = useState<LineEditRow[]>(() =>
+    initialLineEdits(order),
+  );
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -146,6 +193,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
     setShippingProvince(b.deliveryProvinceAfghanistan);
     setShippingTracking(b.deliveryTrackingNumber);
     setShippingDeliveryCostAfn(b.deliveryCost);
+    setLineEdits(initialLineEdits(order));
   }, [order]);
 
   useEffect(() => {
@@ -156,17 +204,25 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
     }
   }, [shippingInterProvince]);
 
+  const fxRateOk = useMemo(() => {
+    const r = parseAfnPerOneUsdFromDb(order.afnPerUsdSnapshot ?? undefined);
+    return Number.isFinite(r) && r > 0;
+  }, [order.afnPerUsdSnapshot]);
+
+  const canEditLinePrices = orderAllowsLinePriceEdit(order.status);
+  const linePricesDirty =
+    canEditLinePrices && !lineEditsMatchOrder(order, lineEdits);
+  const canSaveLinePrices =
+    linePricesDirty &&
+    fxRateOk &&
+    lineEdits.every((l) => l.unitSalePriceAfn > 0 && l.quantity >= 1);
+
   const canEditManualCampaign = order.ctwaSessionId == null;
   const manualCampaignDirty =
     campaignPick !== (order.manualMetaCampaignId ?? MANUAL_CAMPAIGN_NONE);
 
   const needsCapiEventTime =
     !order.capiSent && orderStatusEligibleForPurchaseCapi(nextStatus);
-
-  const fxRateOk = useMemo(() => {
-    const r = parseAfnPerOneUsdFromDb(order.afnPerUsdSnapshot ?? undefined);
-    return Number.isFinite(r) && r > 0;
-  }, [order.afnPerUsdSnapshot]);
 
   const shippingDirty = useMemo(() => {
     const b = shippingBaseline(order);
@@ -261,6 +317,32 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             ? "Manual campaign attribution cleared."
             : "Campaign attribution saved.",
         );
+        router.refresh();
+      })();
+    });
+  }
+
+  function onSaveLinePrices() {
+    startTransition(() => {
+      void (async () => {
+        const res = await updateOrderLinePrices({
+          orderId: order.id,
+          lines: lineEdits.map((l) => ({
+            lineIndex: l.lineIndex,
+            unitSalePrice: l.unitSalePriceAfn,
+            quantity: l.quantity,
+          })),
+        });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Line prices saved.");
+        if (order.capiSent) {
+          toast.message(
+            "Meta Purchase was already sent—use Resend if Events Manager should reflect the new total.",
+          );
+        }
         router.refresh();
       })();
     });
@@ -401,7 +483,7 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
             <span className="text-foreground font-medium">TestEvent</span>—open
             Events Manager → <strong>Test events</strong> to verify. Production sends
             live <span className="text-foreground font-medium">Purchase</span>. Wrong{" "}
-            <code className="text-[11px]">META_DATASET_ID</code> can make Graph return
+            <code className="text-[11px]">META_WABA_ACCOUNTS</code> dataset ids can make Graph return
             OK while nothing useful appears in reporting.
           </CardDescription>
         </CardHeader>
@@ -534,38 +616,121 @@ export function OrderDetailClient({ order, metaCampaignOptions }: Props) {
               {" · AFN "}
               {Math.round(Number(order.valueAfn))}
             </CardDescription>
+          ) : (
+            <CardDescription className="tabular-nums">
+              Merchandise {money(order.value, order.currency)}
+            </CardDescription>
+          )}
+          {canEditLinePrices ? (
+            <CardDescription>
+              Unit prices are in whole AFN using this order&apos;s checkout FX snapshot.
+              Locked after the order is paid, cancelled, or returned.
+            </CardDescription>
+          ) : order.status === "paid" ? (
+            <CardDescription>
+              Prices are locked because this order is paid.
+            </CardDescription>
           ) : null}
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent className="space-y-4 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>#</TableHead>
                 <TableHead>Product</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
+                {canEditLinePrices ? (
+                  <TableHead className="text-right">Unit (AFN)</TableHead>
+                ) : null}
                 <TableHead className="text-right">Line</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {order.lines.map((l) => (
-                <TableRow key={l.lineIndex}>
-                  <TableCell>{l.lineIndex}</TableCell>
-                  <TableCell>{l.productName ?? "—"}</TableCell>
-                  <TableCell className="text-right">{l.quantity}</TableCell>
-                  <TableCell className="max-w-[10rem] text-right text-xs tabular-nums leading-tight">
-                    <span className="block">
-                      {money(l.lineValue, order.currency)}
-                    </span>
-                    {l.lineValueAfn != null && l.lineValueAfn.trim() !== "" ? (
-                      <span className="text-muted-foreground block">
-                        AFN {Math.round(Number(l.lineValueAfn))}
-                      </span>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {canEditLinePrices
+                ? lineEdits.map((edit) => {
+                    const meta = order.lines.find(
+                      (l) => l.lineIndex === edit.lineIndex,
+                    );
+                    return (
+                      <TableRow key={edit.lineIndex}>
+                        <TableCell>{edit.lineIndex}</TableCell>
+                        <TableCell>{meta?.productName ?? "—"}</TableCell>
+                        <TableCell className="text-right">
+                          <DraftNumericInput
+                            variant="qty"
+                            className="ml-auto h-9 w-20 font-mono text-sm tabular-nums"
+                            value={edit.quantity}
+                            onValueChange={(n) =>
+                              setLineEdits((rows) =>
+                                rows.map((r) =>
+                                  r.lineIndex === edit.lineIndex
+                                    ? { ...r, quantity: n }
+                                    : r,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DraftNumericInput
+                            variant="unitAfn"
+                            className="ml-auto h-9 w-28 font-mono text-sm tabular-nums"
+                            value={edit.unitSalePriceAfn}
+                            onValueChange={(n) =>
+                              setLineEdits((rows) =>
+                                rows.map((r) =>
+                                  r.lineIndex === edit.lineIndex
+                                    ? { ...r, unitSalePriceAfn: n }
+                                    : r,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="max-w-[10rem] text-right text-xs tabular-nums leading-tight text-muted-foreground">
+                          {meta
+                            ? money(meta.lineValue, order.currency)
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                : order.lines.map((l) => (
+                    <TableRow key={l.lineIndex}>
+                      <TableCell>{l.lineIndex}</TableCell>
+                      <TableCell>{l.productName ?? "—"}</TableCell>
+                      <TableCell className="text-right">{l.quantity}</TableCell>
+                      <TableCell className="max-w-[10rem] text-right text-xs tabular-nums leading-tight">
+                        <span className="block">
+                          {money(l.lineValue, order.currency)}
+                        </span>
+                        {l.lineValueAfn != null && l.lineValueAfn.trim() !== "" ? (
+                          <span className="text-muted-foreground block">
+                            AFN {Math.round(Number(l.lineValueAfn))}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
             </TableBody>
           </Table>
+          {canEditLinePrices ? (
+            <>
+              {!fxRateOk ? (
+                <p className="text-destructive text-xs">
+                  This order has no valid AFN→USD snapshot—you cannot save line
+                  prices until the checkout rate exists in the database.
+                </p>
+              ) : null}
+              <Button
+                type="button"
+                disabled={pending || !canSaveLinePrices}
+                onClick={onSaveLinePrices}
+              >
+                Save line prices
+              </Button>
+            </>
+          ) : null}
         </CardContent>
       </Card>
 

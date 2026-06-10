@@ -6,7 +6,10 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { deleteOrder } from "@/actions/order";
+import { OrderSalesChannelBadge } from "@/components/contact-source-badge";
 import { Badge } from "@/components/ui/badge";
+import { isOfflinePlaceholderPhone } from "@/lib/offline-contact-phone";
+import { formatStoredContactPhone } from "@/lib/phone-display";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -135,23 +138,22 @@ function OrderListCard({
             >
               {row.id.length > 18 ? `${row.id.slice(0, 16)}…` : row.id}
             </Link>
-            <Link
-              className="text-muted-foreground block truncate font-mono text-xs underline-offset-2 hover:underline"
-              href={`/contacts?q=${encodeURIComponent(row.phone)}`}
-              title={row.phone}
-            >
-              {row.phone}
-            </Link>
+            <p className="text-muted-foreground truncate font-mono text-xs">
+              {formatStoredContactPhone(row.phone)}
+            </p>
           </div>
-          <Badge
-            variant="outline"
-            className={cn(
-              "shrink-0 px-1.5 py-0 text-[10px] font-semibold uppercase",
-              orderStatusBadgeClass(row.status),
-            )}
-          >
-            {formatOrderStatusLabel(row.status)}
-          </Badge>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <OrderSalesChannelBadge channel={row.salesChannel} />
+            <Badge
+              variant="outline"
+              className={cn(
+                "px-1.5 py-0 text-[10px] font-semibold uppercase",
+                orderStatusBadgeClass(row.status),
+              )}
+            >
+              {formatOrderStatusLabel(row.status)}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 px-4 py-3 text-sm">
@@ -277,10 +279,14 @@ export function OrdersListTable({
           <span className="text-muted-foreground">Filtered by contact</span>{" "}
           <Link
             className="font-mono text-xs text-primary underline underline-offset-2"
-            href={`/contacts?q=${encodeURIComponent(rows[0].phone)}`}
-            title="Open contact search for this phone"
+            href={
+              isOfflinePlaceholderPhone(rows[0].phone)
+                ? `/orders?contactId=${encodeURIComponent(rows[0].contactId)}`
+                : `/contacts?q=${encodeURIComponent(rows[0].phone)}`
+            }
+            title="Open contact"
           >
-            {rows[0].phone}
+            {formatStoredContactPhone(rows[0].phone)}
           </Link>{" "}
           ·{" "}
           <Link
@@ -338,6 +344,9 @@ export function OrdersListTable({
                   Phone
                 </TableHead>
                 <TableHead scope="col" className="text-center align-middle">
+                  Channel
+                </TableHead>
+                <TableHead scope="col" className="text-center align-middle">
                   Products
                 </TableHead>
                 <TableHead scope="col" className="min-w-[7rem] text-center align-middle">
@@ -368,7 +377,7 @@ export function OrdersListTable({
                 <TableRow>
                   <TableCell
                     className="text-muted-foreground text-center align-middle"
-                    colSpan={11}
+                    colSpan={12}
                   >
                     {searchQuery?.trim()
                       ? `No orders match “${searchQuery.trim()}”.`
@@ -405,13 +414,20 @@ export function OrdersListTable({
                         </Link>
                       </TableCell>
                       <TableCell className="max-w-[10rem] min-w-0 align-middle text-center font-mono text-xs">
-                        <Link
-                          className="text-primary block truncate underline-offset-2 hover:underline"
-                          href={`/contacts?q=${encodeURIComponent(r.phone)}`}
-                          title={r.phone}
-                        >
-                          {r.phone}
-                        </Link>
+                        {isOfflinePlaceholderPhone(r.phone) ? (
+                          <span className="text-muted-foreground">No phone</span>
+                        ) : (
+                          <Link
+                            className="text-primary block truncate underline-offset-2 hover:underline"
+                            href={`/contacts?q=${encodeURIComponent(r.phone)}`}
+                            title={r.phone}
+                          >
+                            {formatStoredContactPhone(r.phone)}
+                          </Link>
+                        )}
+                      </TableCell>
+                      <TableCell className="align-middle text-center">
+                        <OrderSalesChannelBadge channel={r.salesChannel} />
                       </TableCell>
                       <TableCell className="max-w-[13rem] min-w-0 align-middle px-2 text-center text-sm">
                         {items.length === 0 ? (
@@ -475,7 +491,9 @@ export function OrdersListTable({
                       </TableCell>
                       <TableCell className="align-middle text-center">
                         <div className="flex justify-center">
-                          {r.capiSent ? (
+                          {r.salesChannel === "offline" ? (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          ) : r.capiSent ? (
                             <Badge variant="default">sent</Badge>
                           ) : (
                             <Badge variant="secondary">pending</Badge>

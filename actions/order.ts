@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 
@@ -27,16 +27,18 @@ import {
   serializeMetaPayload,
   type MetaPurchaseParams,
 } from "@/lib/meta-capi";
+import { createOfflineContactByPhone } from "@/lib/contacts";
 import {
   isWithinMetaEventTimeWindow,
   kabulDateTimeLocalToDate,
 } from "@/lib/kabul-time";
+import { resolveCampaignAttributedAt } from "@/lib/order-campaign-attribution";
 import { contactPhoneKeyFromRaw } from "@/lib/contact-phone";
 import { e164ToDigits } from "@/lib/phone";
+import { resolveOrderCapiAttribution } from "@/lib/order-capi-waba";
 import {
   buildMetaPurchaseParamsFromContext,
   loadOrderPurchaseCapiContext,
-  resolveContactCtwaForCapi,
 } from "@/lib/order-meta-capi";
 import { convertOrderFormLinesFromAfn } from "@/lib/order-afn-input-to-usd";
 import { loadRecentOrdersForContact } from "@/lib/orders-list";
@@ -50,9 +52,11 @@ import {
   type CreateOrderInput,
   deleteOrderSchema,
   linkOrderManualCampaignSchema,
+  orderAllowsLinePriceEdit,
   orderStatusEligibleForPurchaseCapi,
   resendOrderPurchaseCapiBaseSchema,
   resendOrderPurchaseCapiSchema,
+  updateOrderLinePricesSchema,
   updateOrderMetadataSchema,
   updateOrderStatusSchema,
   type UpdateOrderStatusInput,
@@ -121,12 +125,126 @@ export async function getRecentOrdersByPhoneForNewOrder(
   }));
 }
 
+/** Orders already linked to a CTWA session (for new-order duplicate warning). */
+export type CtwaSessionOrderAlertRow = {
+  id: string;
+  status: string;
+  valueUsd: string;
+  orderEventAtIso: string;
+};
+
+export async function getOrdersForCtwaSession(
+  ctwaSessionId: string,
+): Promise<CtwaSessionOrderAlertRow[]> {
+  const limited = await enforcePublicActionRateLimit("ctwa_session_orders", {
+    limit: 80,
+    windowMs: 60_000,
+  });
+  if (!limited.ok) return [];
+
+  const sessionId = ctwaSessionId.trim();
+  if (!sessionId) return [];
+
+  const rows = await db
+    .select({
+      id: orders.id,
+      status: orders.status,
+      value: orders.value,
+      orderEventAt: orders.orderEventAt,
+    })
+    .from(orders)
+    .where(eq(orders.ctwaSessionId, sessionId))
+    .orderBy(desc(orders.orderEventAt))
+    .limit(10);
+
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    valueUsd: String(r.value),
+    orderEventAtIso: r.orderEventAt.toISOString(),
+  }));
+}
+
+async function resolveOrCreateContactForOrder(
+  data: CreateOrderInput,
+): Promise<
+  | { ok: true; contact: typeof contacts.$inferSelect }
+  | { ok: false; error: string }
+> {
+  const isOffline = data.salesChannel === "offline";
+  const phoneKey = contactPhoneKeyFromRaw(data.phone);
+
+  if (!isOffline && !phoneKey) {
+    return {
+      ok: false,
+      error: "Enter a valid phone number (with country code).",
+    };
+  }
+
+  if (phoneKey) {
+    const [existing] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.phoneNumber, phoneKey))
+      .limit(1);
+    if (existing) {
+      return { ok: true, contact: existing };
+    }
+    if (!isOffline) {
+      return {
+        ok: false,
+        error:
+          "No contact found for this number. The customer must reach you on WhatsApp first.",
+      };
+    }
+  }
+
+  if (!isOffline) {
+    return {
+      ok: false,
+      error:
+        "No contact found for this number. The customer must reach you on WhatsApp first.",
+    };
+  }
+
+  try {
+    const created = await createOfflineContactByPhone({
+      phoneNumber: phoneKey ?? undefined,
+      name: data.offlineContactName?.trim() || undefined,
+    });
+    const [contact] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, created.id))
+      .limit(1);
+    if (!contact) {
+      return { ok: false, error: "Could not load contact after registration." };
+    }
+    return { ok: true, contact };
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof Error ? e.message : "Could not register in-store contact.",
+    };
+  }
+}
+
 const PREVIEW_ORDER_ID = "PREVIEW";
 
 const CAPI_DEFERRED_PAYLOAD_JSON = JSON.stringify(
   {
     note: "Meta Purchase is sent only when status is Confirmed or Paid. Create this order as Pending (or change status on the order page); then set Confirmed or Paid to fire CAPI.",
     capiDeferred: true,
+  },
+  null,
+  2,
+);
+
+const CAPI_OFFLINE_PAYLOAD_JSON = JSON.stringify(
+  {
+    note: "In-store sale — no Meta Purchase event is sent.",
+    capiOffline: true,
   },
   null,
   2,
@@ -194,6 +312,10 @@ export async function previewOrderCapiPayload(
   }
 
   const data = parsed.data;
+  if (data.salesChannel === "offline") {
+    return { ok: true, payloadJson: CAPI_OFFLINE_PAYLOAD_JSON };
+  }
+
   const phoneKey = contactPhoneKeyFromRaw(data.phone);
   if (!phoneKey) {
     return { ok: false, error: "Enter a valid phone number (with country code)." };
@@ -265,12 +387,16 @@ export async function previewOrderCapiPayload(
   );
   if (!manualCamp.ok) return manualCamp;
 
-  const ctwa = await resolveContactCtwaForCapi(
-    contact.id,
-    data.ctwaSessionId,
-  );
-  const ctwaClid = ctwa.ctwaClid;
-  const wabaId = ctwa.wabaId;
+  const attribution = await resolveOrderCapiAttribution({
+    contactId: contact.id,
+    ctwaSessionId: data.ctwaSessionId,
+    capiWabaId: data.capiWabaId,
+  });
+  if ("ok" in attribution) {
+    return { ok: false, error: attribution.error };
+  }
+  const ctwaClid = attribution.ctwaClid;
+  const wabaId = attribution.capiWabaId;
 
   if (process.env.NODE_ENV !== "production") {
     if (!process.env.META_TEST_EVENT_CODE?.trim()) {
@@ -401,24 +527,13 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   }
 
   const data = parsed.data;
-  const phoneKey = contactPhoneKeyFromRaw(data.phone);
-  if (!phoneKey) {
-    return { ok: false, error: "Enter a valid phone number (with country code)." };
-  }
+  const isOffline = data.salesChannel === "offline";
 
-  const [contact] = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.phoneNumber, phoneKey))
-    .limit(1);
-
-  if (!contact) {
-    return {
-      ok: false,
-      error:
-        "No contact found for this number. The customer must reach you on WhatsApp first.",
-    };
+  const contactResolved = await resolveOrCreateContactForOrder(data);
+  if (!contactResolved.ok) {
+    return { ok: false, error: contactResolved.error };
   }
+  const contact = contactResolved.contact;
 
   const productIds = [...new Set(data.lines.map((l) => l.productId))];
   const productRows = await db
@@ -457,7 +572,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   } catch {
     return { ok: false, error: "Invalid event time (Kabul)." };
   }
-  if (!isWithinMetaEventTimeWindow(orderEventAt)) {
+  if (!isOffline && !isWithinMetaEventTimeWindow(orderEventAt)) {
     return {
       ok: false,
       error:
@@ -465,20 +580,46 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
-  const ctwa = await resolveContactCtwaForCapi(
-    contact.id,
-    data.ctwaSessionId,
-  );
+  let ctwaSessionIdToSave: string | null = null;
+  let manualCampaignIdToSave: string | null = null;
+  let attributed: Awaited<ReturnType<typeof resolveCampaignAttributedAt>> = {
+    ok: true,
+    at: null,
+  };
+  let ctwaClid: string | null = null;
+  let capiWabaIdToSave: string | null = null;
 
-  const manualCamp = await validateOptionalManualMetaCampaign(
-    data.manualMetaCampaignId,
-  );
-  if (!manualCamp.ok) return manualCamp;
+  if (!isOffline) {
+    const attribution = await resolveOrderCapiAttribution({
+      contactId: contact.id,
+      ctwaSessionId: data.ctwaSessionId,
+      capiWabaId: data.capiWabaId,
+    });
+    if ("ok" in attribution) {
+      return { ok: false, error: attribution.error };
+    }
+    ctwaSessionIdToSave = attribution.ctwaSessionId;
+    ctwaClid = attribution.ctwaClid;
+    capiWabaIdToSave = attribution.capiWabaId;
 
-  /** P&amp;L manual attribution only when the contact has no CTWA sessions at all. */
-  const manualCampaignIdToSave = ctwa.ctwaSessionId
-    ? null
-    : manualCamp.id;
+    const manualCamp = await validateOptionalManualMetaCampaign(
+      data.manualMetaCampaignId,
+    );
+    if (!manualCamp.ok) return manualCamp;
+
+    /** P&amp;L manual attribution only when the contact has no CTWA sessions at all. */
+    manualCampaignIdToSave = attribution.ctwaSessionId ? null : manualCamp.id;
+
+    attributed = await resolveCampaignAttributedAt({
+      salesChannel: "online",
+      ctwaSessionId: attribution.ctwaSessionId,
+      manualMetaCampaignId: manualCampaignIdToSave,
+      manualCampaignAttributedAtKabul: data.manualCampaignAttributedAtKabul,
+    });
+    if (!attributed.ok) {
+      return { ok: false, error: attributed.error };
+    }
+  }
 
   const provinceToSave =
     data.interProvinceAfghanistanDelivery &&
@@ -491,9 +632,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       ? data.deliveryTrackingNumber.trim()
       : null;
 
-  const ctwaClid = ctwa.ctwaClid;
-  const wabaId = ctwa.wabaId;
-  const capiEligible = orderStatusEligibleForPurchaseCapi(data.status);
+  const capiEligible =
+    !isOffline && orderStatusEligibleForPurchaseCapi(data.status);
 
   let eventId = "";
   let capiPayloadJson = CAPI_DEFERRED_PAYLOAD_JSON;
@@ -515,7 +655,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         lineValue: r.lineUsd,
       })),
       ctwaClid,
-      whatsappBusinessAccountId: wabaId,
+      whatsappBusinessAccountId: capiWabaIdToSave,
       phoneDigits: e164ToDigits(contact.phoneNumber),
     };
 
@@ -540,13 +680,19 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     return { ok: false, error: "Invalid courier fee in AFN." };
   }
 
+  const capiPayloadJsonFinal = isOffline
+    ? CAPI_OFFLINE_PAYLOAD_JSON
+    : capiPayloadJson;
+
   const [inserted] = await db
     .insert(orders)
     .values({
       id: orderPk,
       contactId: contact.id,
-      ctwaSessionId: ctwa.ctwaSessionId,
+      ctwaSessionId: ctwaSessionIdToSave,
+      capiWabaId: capiWabaIdToSave,
       manualMetaCampaignId: manualCampaignIdToSave,
+      salesChannel: data.salesChannel,
       value: formatUsd2(orderTotal),
       currency: APP_CURRENCY,
       status: data.status,
@@ -559,6 +705,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       codFee: "0",
       afnPerUsdSnapshot: fx.snapshot,
       orderEventAt,
+      campaignAttributedAt: attributed.ok ? attributed.at : null,
     })
     .returning();
 
@@ -602,7 +749,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     };
   }
 
-  if (manualCampaignIdToSave && !ctwa.ctwaSessionId) {
+  if (manualCampaignIdToSave && !ctwaSessionIdToSave) {
     try {
       await recordManualCampaignAttributionChange({
         actorEmail: "public-order-create",
@@ -628,7 +775,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     orderId: orderPk,
     capiSent,
     capiEventId: capiSent ? eventId : "",
-    capiPayloadJson,
+    capiPayloadJson: capiPayloadJsonFinal,
     capiError: null,
   };
 }
@@ -763,19 +910,28 @@ export async function linkOrderManualCampaign(
       error: parsed.error.issues[0]?.message ?? "Invalid input",
     };
   }
-  const { orderId, metaCampaignId } = parsed.data;
+  const { orderId, metaCampaignId, manualCampaignAttributedAtKabul } =
+    parsed.data;
 
   const [order] = await db
     .select({
       id: orders.id,
       ctwaSessionId: orders.ctwaSessionId,
       manualMetaCampaignId: orders.manualMetaCampaignId,
+      orderEventAt: orders.orderEventAt,
+      salesChannel: orders.salesChannel,
     })
     .from(orders)
     .where(eq(orders.id, orderId))
     .limit(1);
 
   if (!order) return { ok: false, error: "Order not found." };
+  if (order.salesChannel === "offline") {
+    return {
+      ok: false,
+      error: "In-store orders are not included in Campaign reports.",
+    };
+  }
   if (order.ctwaSessionId != null) {
     return {
       ok: false,
@@ -794,6 +950,7 @@ export async function linkOrderManualCampaign(
       .update(orders)
       .set({
         manualMetaCampaignId: null,
+        campaignAttributedAt: null,
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
@@ -833,10 +990,26 @@ export async function linkOrderManualCampaign(
     };
   }
 
+  let campaignAttributedAt: Date;
+  const whenRaw = manualCampaignAttributedAtKabul?.trim() ?? "";
+  if (whenRaw) {
+    try {
+      campaignAttributedAt = kabulDateTimeLocalToDate(whenRaw);
+    } catch {
+      return {
+        ok: false,
+        error: "Invalid campaign attribution date and time (Kabul).",
+      };
+    }
+  } else {
+    campaignAttributedAt = order.orderEventAt;
+  }
+
   await db
     .update(orders)
     .set({
       manualMetaCampaignId: metaCampaignId,
+      campaignAttributedAt,
       updatedAt: new Date(),
     })
     .where(eq(orders.id, orderId));
@@ -965,6 +1138,155 @@ export async function updateOrderMetadata(
       updatedAt: new Date(),
     })
     .where(eq(orders.id, orderRow.id));
+
+  revalidatePath("/campaigns", "layout");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderRow.id}`);
+  revalidatePath(`/orders/${orderRow.id}/confirmation`);
+
+  return { ok: true };
+}
+
+export type UpdateOrderLinePricesResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export async function updateOrderLinePrices(
+  raw: unknown,
+): Promise<UpdateOrderLinePricesResult> {
+  await assertStaffSession();
+
+  const parsed = updateOrderLinePricesSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const data = parsed.data;
+
+  const [orderRow] = await db
+    .select({
+      id: orders.id,
+      status: orders.status,
+      afnPerUsdSnapshot: orders.afnPerUsdSnapshot,
+    })
+    .from(orders)
+    .where(eq(orders.id, data.orderId))
+    .limit(1);
+
+  if (!orderRow) {
+    return { ok: false, error: "Order not found." };
+  }
+
+  if (!orderAllowsLinePriceEdit(orderRow.status)) {
+    return {
+      ok: false,
+      error:
+        "Line prices can only be edited before the order is paid, cancelled, or returned.",
+    };
+  }
+
+  const snapshotStr =
+    typeof orderRow.afnPerUsdSnapshot === "string"
+      ? orderRow.afnPerUsdSnapshot.trim()
+      : "";
+  const afnPerOneUsd = parseAfnPerOneUsdFromDb(snapshotStr || undefined);
+  if (!(Number.isFinite(afnPerOneUsd) && afnPerOneUsd > 0)) {
+    return {
+      ok: false,
+      error:
+        "This order has no valid AFN→USD snapshot; line prices cannot be converted.",
+    };
+  }
+
+  const existingLines = await db
+    .select({
+      lineIndex: orderItems.lineIndex,
+      productId: orderItems.productId,
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderRow.id))
+    .orderBy(orderItems.lineIndex);
+
+  if (existingLines.length !== data.lines.length) {
+    return {
+      ok: false,
+      error: "Submit every line on this order when saving prices.",
+    };
+  }
+
+  const existingByIndex = new Map(
+    existingLines.map((l) => [l.lineIndex, l.productId]),
+  );
+  for (const line of data.lines) {
+    const expectedProductId = existingByIndex.get(line.lineIndex);
+    if (expectedProductId == null) {
+      return {
+        ok: false,
+        error: `Unknown line index ${line.lineIndex}.`,
+      };
+    }
+  }
+
+  const productIds = [...new Set(existingLines.map((l) => l.productId))];
+  const productRows = await db
+    .select()
+    .from(products)
+    .where(inArray(products.id, productIds));
+  const productById = new Map(productRows.map((p) => [p.id, p]));
+
+  const conv = convertOrderFormLinesFromAfn(
+    data.lines.map((l) => {
+      const productId = existingByIndex.get(l.lineIndex)!;
+      return {
+        productId,
+        unitSalePrice: l.unitSalePrice,
+        quantity: l.quantity,
+      };
+    }),
+    productById,
+    afnPerOneUsd,
+  );
+  if (!conv.ok) {
+    return { ok: false, error: conv.error };
+  }
+
+  const resolvedByIndex = new Map(
+    conv.resolved.map((r, i) => [data.lines[i]!.lineIndex, r]),
+  );
+
+  await db.transaction(async (tx) => {
+    for (const line of data.lines) {
+      const r = resolvedByIndex.get(line.lineIndex);
+      if (!r) continue;
+      const unitCogs = Number(r.product.cogs);
+      const safeUnitCogs = Number.isFinite(unitCogs) ? unitCogs : 0;
+      const lineCogs = safeUnitCogs * r.quantity;
+      await tx
+        .update(orderItems)
+        .set({
+          quantity: r.quantity,
+          unitSalePrice: formatUsd2(r.unitUsd),
+          lineValue: formatUsd2(r.lineUsd),
+          lineCogs: lineCogs.toFixed(4),
+        })
+        .where(
+          and(
+            eq(orderItems.orderId, orderRow.id),
+            eq(orderItems.lineIndex, line.lineIndex),
+          ),
+        );
+    }
+    await tx
+      .update(orders)
+      .set({
+        value: formatUsd2(conv.orderTotalUsd),
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderRow.id));
+  });
 
   revalidatePath("/campaigns", "layout");
   revalidatePath("/orders");

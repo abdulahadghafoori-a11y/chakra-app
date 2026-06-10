@@ -1,5 +1,7 @@
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 
+import { isOfflinePlaceholderPhone } from "@/lib/offline-contact-phone";
+
 export type PhonePresentation = {
   /** E.g. international format with spaces */
   formattedInternational: string;
@@ -13,6 +15,13 @@ export type PhonePresentation = {
  * Derives display formatting and country from stored `contacts.phone_number`
  * (international digits) or legacy E.164 with `+`.
  */
+/** Human-readable phone for UI; placeholder in-store keys show as “No phone”. */
+export function formatStoredContactPhone(storedPhone: string): string {
+  if (!storedPhone?.trim()) return "—";
+  if (isOfflinePlaceholderPhone(storedPhone)) return "No phone";
+  return getPhonePresentation(storedPhone).formattedInternational;
+}
+
 export function getPhonePresentation(storedPhone: string): PhonePresentation {
   if (!storedPhone?.trim()) {
     return {
@@ -23,6 +32,13 @@ export function getPhonePresentation(storedPhone: string): PhonePresentation {
   }
 
   const raw = storedPhone.trim();
+  if (isOfflinePlaceholderPhone(raw)) {
+    return {
+      formattedInternational: "No phone",
+      countryCode: null,
+      countryName: null,
+    };
+  }
   const forParse = raw.startsWith("+")
     ? raw
     : `+${raw.replace(/\D/g, "")}`;
