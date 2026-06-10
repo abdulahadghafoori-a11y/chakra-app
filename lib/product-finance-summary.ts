@@ -216,7 +216,7 @@ export async function getProductFinanceReport(input: {
   }
 
   // Correct total insights (sum campaigns once)
-  totalInsightsSpend = 0;
+  let totalInsightsSpend = 0;
   for (const spend of spendByCampaign.values()) {
     totalInsightsSpend += spend;
   }
